@@ -19,6 +19,8 @@ package clortho
 
 import (
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/rsa"
 
 	"github.com/lestrrat-go/jwx/jwk"
 	"go.uber.org/multierr"
@@ -76,10 +78,31 @@ func convertJWKKey(jk jwk.Key) (Key, error) {
 		return nil, err
 	}
 
-	if pub, err := jk.PublicKey(); err != nil {
-		return nil, err
-	} else if err = pub.Raw(&k.public); err != nil {
-		return nil, err
+	type publicer interface {
+		Public() crypto.PublicKey
+	}
+
+	switch rt := k.raw.(type) {
+	case publicer:
+		// save a bit of memory by storing a reference to the raw key's public key
+		k.public = rt.Public()
+
+	case *rsa.PublicKey:
+		k.public = rt
+
+	case *ecdsa.PublicKey:
+		k.public = rt
+
+	default:
+		// fallback to just making a copy of the public key, since we
+		// don't know how to handle it.  this default case will also
+		// get executed for octet keys, which makes a safe copy of the
+		// public key.
+		if pub, err := jk.PublicKey(); err != nil {
+			return nil, err
+		} else if err := pub.Raw(&k.public); err != nil {
+			return nil, err
+		}
 	}
 
 	return k, nil
