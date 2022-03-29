@@ -133,9 +133,26 @@ type CommandLine struct {
 
 	KeyID      string     `name:"kid" help:"the key id"`
 	KeyUsage   string     `name:"use" help:"the intended usage for the key, e.g. sig or enc"`
+	KeyOps     []string   `name:"key_ops" help:"the set of key operations.  duplicate values are not allowed."`
+	Algorithm  string     `name:"alg" help:"the algorithm the generated key is intended to be used with."`
 	Attributes Attributes `help:"additional, nonstandard attributes.  supplying any standard JWK attributes results in an error.  values that parse as numbers as added as such.  values enclosed in single quotes are always added as strings."`
 
 	Seed int64 `help:"the RNG seed for key generation, used primarily for testing with consistent output.  DO NOT USE FOR PRODUCTION KEYS."`
+}
+
+func (cli *CommandLine) Validate() error {
+	if len(cli.KeyOps) > 0 {
+		keyOps := make(map[string]bool, len(cli.KeyOps))
+		for _, v := range cli.KeyOps {
+			if keyOps[v] {
+				return fmt.Errorf("Duplicate key op '%s'", v)
+			}
+
+			keyOps[v] = true
+		}
+	}
+
+	return nil
 }
 
 func (cli *CommandLine) AfterApply(ctx *kong.Context) error {
@@ -165,6 +182,14 @@ func (cli *CommandLine) Run(ctx *kong.Context, generatedKey jwk.Key) error {
 
 	if len(cli.KeyUsage) > 0 {
 		generatedKey.Set(jwk.KeyUsageKey, cli.KeyUsage)
+	}
+
+	if len(cli.KeyOps) > 0 {
+		generatedKey.Set(jwk.KeyOpsKey, cli.KeyOps)
+	}
+
+	if len(cli.Algorithm) > 0 {
+		generatedKey.Set(jwk.AlgorithmKey, cli.Algorithm)
 	}
 
 	data, err := json.MarshalIndent(generatedKey, "", "\t")
