@@ -6,10 +6,10 @@ import (
 	"crypto/elliptic"
 	crand "crypto/rand"
 	"crypto/rsa"
-	"encoding/json"
 	"fmt"
 	"io"
 	mrand "math/rand"
+	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/lestrrat-go/jwx/jwk"
@@ -36,7 +36,8 @@ func (r *RSA) AfterApply(ctx *kong.Context, random io.Reader) error {
 }
 
 type EC struct {
-	Curve string `name:"crv" default:"P-256" enum:"P-256,P-384,P-521" help:"the elliptic curve to use"`
+	Curve  string `name:"crv" default:"P-256" enum:"P-256,P-384,P-521" help:"the elliptic curve to use"`
+	Public string `help:"the output file for the public key.  if not supplied, the public key is not output separately.  if --format was not supplied, the format is deduced from this file's extension."`
 }
 
 func (e *EC) AfterApply(ctx *kong.Context, random io.Reader) error {
@@ -126,7 +127,7 @@ func (o *OKP) AfterApply(ctx *kong.Context, random io.Reader) (err error) {
 }
 
 type CommandLine struct {
-	RSA RSA `cmd:"" name:"RSA"`
+	RSA RSA `cmd:"" name:"RSA" help:"Generates RSA keys"`
 	EC  EC  `cmd:"" name:"EC"`
 	Oct Oct `cmd:"" name:"oct"`
 	OKP OKP `cmd:"" name:"OKP"`
@@ -136,6 +137,11 @@ type CommandLine struct {
 	KeyOps     []string   `name:"key_ops" help:"the set of key operations.  duplicate values are not allowed."`
 	Algorithm  string     `name:"alg" help:"the algorithm the generated key is intended to be used with."`
 	Attributes Attributes `help:"additional, nonstandard attributes.  supplying any standard JWK attributes results in an error.  values that parse as numbers as added as such.  values enclosed in single quotes are always added as strings."`
+
+	In []string `short:"i" sep:"none" placeholder:"FILE" help:"sources of keys to which the generated key will be appended.  the formats are autodetected. a '-' indicates stdin.  duplicate files are ignored."`
+
+	Out       string `short:"o" placeholder:"FILE" help:"the file to which the generated key, possibly appended to --in, will be written.  If not supplied or set to '-', the generated key will be written to stdout.  If --in is supplied and refers to the same file as this option, that file will be overwritten."`
+	OutFormat string `placeholder:"FORMAT" enum:"pem,jwk,jwk-set" default:"jwk" help:"the output format of the key, which will be a jwk-set by default. even if jwk is used, a jwk-set will still be output if the generated key is appended to any --in sources."`
 
 	Seed int64 `help:"the RNG seed for key generation, used primarily for testing with consistent output.  DO NOT USE FOR PRODUCTION KEYS."`
 }
@@ -155,8 +161,10 @@ func (cli *CommandLine) Validate() error {
 	return nil
 }
 
-func (cli *CommandLine) AfterApply(ctx *kong.Context) error {
+func (cli *CommandLine) AfterApply(k *kong.Kong, ctx *kong.Context) error {
 	if cli.Seed != 0 {
+		// IMPORTANT:  This is for testing, so that repeated invocations will produce
+		// the same key.  DO NOT USE FOR PRODUCTION KEYS.
 		ctx.BindTo(
 			mrand.New(mrand.NewSource(cli.Seed)),
 			(*io.Reader)(nil),
@@ -168,13 +176,24 @@ func (cli *CommandLine) AfterApply(ctx *kong.Context) error {
 		)
 	}
 
+	set, err := ReadSets(os.Stdin, cli.In, false)
+	if err != nil {
+		return err
+	}
+
+	ctx.BindTo(set, (*jwk.Set)(nil))
 	return nil
 }
 
-func (cli *CommandLine) Run(ctx *kong.Context, generatedKey jwk.Key) error {
+// setAttributes sets both the key attributes established by command line options, e.g. kid,
+// and the extra attributes.
+func (cli *CommandLine) setAttributes(generatedKey jwk.Key) error {
 	if err := cli.Attributes.SetTo(generatedKey); err != nil {
 		return err
 	}
+
+	// NOTE: jwk.Key.Set is documented as not returning an error
+	// for the keys we're setting below
 
 	if len(cli.KeyID) > 0 {
 		generatedKey.Set(jwk.KeyIDKey, cli.KeyID)
@@ -192,13 +211,18 @@ func (cli *CommandLine) Run(ctx *kong.Context, generatedKey jwk.Key) error {
 		generatedKey.Set(jwk.AlgorithmKey, cli.Algorithm)
 	}
 
-	data, err := json.MarshalIndent(generatedKey, "", "\t")
-	if err != nil {
+	return nil
+}
+
+// Run handles adding any common attributes to the key created by the subcommand.
+// This method also handles writing the private key as requested by the CLI options.
+func (cli *CommandLine) Run(k *kong.Kong, ctx *kong.Context, in jwk.Set, generatedKey jwk.Key) error {
+	if err := cli.setAttributes(generatedKey); err != nil {
 		return err
 	}
 
-	_, err = ctx.Stdout.Write(data)
-	return err
+	in.Add(generatedKey)
+	return WriteSet(in, k.Stdout, cli.OutFormat, cli.Out)
 }
 
 func newParser() *kong.Kong {
