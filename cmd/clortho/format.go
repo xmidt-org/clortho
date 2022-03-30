@@ -2,9 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -35,92 +33,64 @@ func IsJSON(data []byte) bool {
 	return false
 }
 
-func readSetFromPath(path string, ignoreMissing bool) (jwk.Set, error) {
+func ReadSetFile(path string) (jwk.Set, error) {
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+
 	f, err := os.Open(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrExist) && ignoreMissing {
-			return nil, nil
-		}
-
 		return nil, err
 	}
 
 	defer f.Close()
-	return readSetFromReader(f)
-}
-
-func readSetFromReader(r io.Reader) (jwk.Set, error) {
-	data, err := io.ReadAll(r)
+	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(data) > 0 {
-		return jwk.Parse(data, jwk.WithPEM(!IsJSON(data)))
-	}
-
-	// an empty file or nothing from stdin is ok
-	return nil, nil
-}
-
-func ReadSets(stdin io.Reader, in []string, ignoreMissing bool) (merged jwk.Set, err error) {
-	merged = jwk.NewSet()
-	previous := make(map[string]bool, len(in))
-	for _, source := range in {
-		var keys jwk.Set
-		if IsFile(source) {
-			source, err = filepath.Abs(source)
-			if err != nil {
-				return
-			}
-
-			if previous[source] {
-				continue
-			}
-
-			previous[source] = true
-			keys, err = readSetFromPath(source, ignoreMissing)
-		} else if !previous[""] {
-			previous[""] = true
-			keys, err = readSetFromReader(stdin)
+	switch {
+	case IsJSON(data):
+		// There's a bug in jwk.Parse:  when passed a single key, it does not
+		// work as intended.  The JWK set contains all the fields of the original
+		// key parsed, along with a keys array.
+		//
+		// Workaround:  try parsing this as a key first, then as a set.
+		key, err := jwk.ParseKey(data)
+		if err == nil {
+			set := jwk.NewSet()
+			set.Add(key)
+			return set, nil
 		}
 
-		if err != nil {
-			return
-		} else if keys == nil {
-			continue // empty input
-		}
+		return jwk.Parse(data)
 
-		for i := 0; i < keys.Len(); i++ {
-			k, _ := keys.Get(i)
-			merged.Add(k)
-		}
-	}
+	case len(data) > 0:
+		return jwk.Parse(data, jwk.WithPEM(true))
 
-	return
-}
-
-func WriteSet(set jwk.Set, stdout io.Writer, format, path string) error {
-	if IsFile(path) {
-		var err error
-		path, err = filepath.Abs(path)
-		if err != nil {
-			return err
-		}
-
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		if err != nil {
-			return err
-		}
-
-		defer f.Close()
-		return WriteSetTo(set, format, f)
-	} else {
-		return WriteSetTo(set, format, stdout)
+	default:
+		return jwk.NewSet(), nil
 	}
 }
 
-func WriteSetTo(set jwk.Set, format string, o io.Writer) (err error) {
+func WriteSetFile(set jwk.Set, format, path string) error {
+	var err error
+	path, err = filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+
+	defer f.Close()
+	return WriteSet(set, format, f)
+}
+
+func WriteSet(set jwk.Set, format string, o io.Writer) (err error) {
 	var data []byte
 	switch {
 	case format == FormatPEM:

@@ -6,10 +6,11 @@ import (
 	"crypto/elliptic"
 	crand "crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	mrand "math/rand"
-	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/lestrrat-go/jwx/jwk"
@@ -138,10 +139,9 @@ type CommandLine struct {
 	Algorithm  string     `name:"alg" help:"the algorithm the generated key is intended to be used with."`
 	Attributes Attributes `help:"additional, nonstandard attributes.  supplying any standard JWK attributes results in an error.  values that parse as numbers as added as such.  values enclosed in single quotes are always added as strings."`
 
-	In []string `short:"i" sep:"none" placeholder:"FILE" help:"sources of keys to which the generated key will be appended.  the formats are autodetected. a '-' indicates stdin.  duplicate files are ignored."`
-
-	Out       string `short:"o" placeholder:"FILE" help:"the file to which the generated key, possibly appended to --in, will be written.  If not supplied or set to '-', the generated key will be written to stdout.  If --in is supplied and refers to the same file as this option, that file will be overwritten."`
-	OutFormat string `placeholder:"FORMAT" enum:"pem,jwk,jwk-set" default:"jwk" help:"the output format of the key, which will be a jwk-set by default. even if jwk is used, a jwk-set will still be output if the generated key is appended to any --in sources."`
+	Output string `short:"o" xor:"output,append" placeholder:"FILE" help:"file to write the generated key.  '-' indicates stdout, which is also used if neither --output or --append is supplied.  if this is a system file, it will be created or overwritten as needed."`
+	Append string `short:"a" xor:"output,append" placeholder:"FILE" help:"file to which the generated key is appended.  this file must exist and cannot be stdout."`
+	Format string `short:"f" placeholder:"FORMAT" enum:"pem,jwk,jwk-set" default:"jwk" help:"the output format of the key, which will be a jwk-set by default. even if jwk is used, a jwk-set will still be output if the generated key is appended to any --in sources."`
 
 	Seed int64 `help:"the RNG seed for key generation, used primarily for testing with consistent output.  DO NOT USE FOR PRODUCTION KEYS."`
 }
@@ -176,12 +176,26 @@ func (cli *CommandLine) AfterApply(k *kong.Kong, ctx *kong.Context) error {
 		)
 	}
 
-	set, err := ReadSets(os.Stdin, cli.In, false)
-	if err != nil {
-		return err
+	var set jwk.Set
+	if len(cli.Append) > 0 {
+		var err error
+		set, err = ReadSetFile(cli.Append)
+
+		// treat nonexistent files for appending as if they were simply empty
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
 	}
 
-	ctx.BindTo(set, (*jwk.Set)(nil))
+	if set == nil {
+		set = jwk.NewSet()
+	}
+
+	ctx.BindTo(
+		set,
+		(*jwk.Set)(nil),
+	)
+
 	return nil
 }
 
@@ -216,13 +230,23 @@ func (cli *CommandLine) setAttributes(generatedKey jwk.Key) error {
 
 // Run handles adding any common attributes to the key created by the subcommand.
 // This method also handles writing the private key as requested by the CLI options.
-func (cli *CommandLine) Run(k *kong.Kong, ctx *kong.Context, in jwk.Set, generatedKey jwk.Key) error {
+func (cli *CommandLine) Run(k *kong.Kong, ctx *kong.Context, set jwk.Set, generatedKey jwk.Key) error {
 	if err := cli.setAttributes(generatedKey); err != nil {
 		return err
 	}
 
-	in.Add(generatedKey)
-	return WriteSet(in, k.Stdout, cli.OutFormat, cli.Out)
+	set.Add(generatedKey)
+
+	switch {
+	case len(cli.Append) > 0:
+		return WriteSetFile(set, cli.Format, cli.Append)
+
+	case IsFile(cli.Output):
+		return WriteSetFile(set, cli.Format, cli.Output)
+
+	default:
+		return WriteSet(set, cli.Format, k.Stdout)
+	}
 }
 
 func newParser() *kong.Kong {
