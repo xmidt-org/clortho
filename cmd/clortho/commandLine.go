@@ -72,6 +72,7 @@ func (gout GeneratedOut) path() (path string, isAppend bool, err error) {
 	return
 }
 
+// RSA holds the command line options for generating RSA keys.
 type RSA struct {
 	Size      uint      `short:"s" default:"256" help:"the size of the key to generate, in bits"`
 	PublicOut PublicOut `embed:""`
@@ -93,6 +94,7 @@ func (r *RSA) AfterApply(ctx *kong.Context, random io.Reader) error {
 	return nil
 }
 
+// EC holds the command line options for generating elliptic curve keys.
 type EC struct {
 	Curve     string    `name:"crv" default:"P-256" enum:"P-256,P-384,P-521" help:"the elliptic curve to use"`
 	PublicOut PublicOut `embed:""`
@@ -132,6 +134,7 @@ func (e *EC) AfterApply(ctx *kong.Context, random io.Reader) error {
 	return nil
 }
 
+// Oct holds the command line options for generating symmetric keys.
 type Oct struct {
 	Size uint `short:"s" default:"256" help:"the size of the key to generate, in bits"`
 }
@@ -158,6 +161,7 @@ func (o *Oct) AfterApply(ctx *kong.Context, random io.Reader) error {
 	return nil
 }
 
+// OKP holds the command line options for generating elliptic curve keys for signing and verifying.
 type OKP struct {
 	Curve     string    `name:"crv" default:"Ed25519" enum:"Ed25519,X25519" help:"the elliptic curve to use"`
 	PublicOut PublicOut `embed:""`
@@ -190,9 +194,9 @@ func (o *OKP) AfterApply(ctx *kong.Context, random io.Reader) (err error) {
 
 type CommandLine struct {
 	RSA RSA `cmd:"" name:"RSA" help:"Generates RSA keys"`
-	EC  EC  `cmd:"" name:"EC"`
-	Oct Oct `cmd:"" name:"oct"`
-	OKP OKP `cmd:"" name:"OKP"`
+	EC  EC  `cmd:"" name:"EC" help:"Generates elliptic curve keys"`
+	Oct Oct `cmd:"" name:"oct" help:"Generates symmetric keys"`
+	OKP OKP `cmd:"" name:"OKP" help:"generates elliptic curve edwards or montgomery keys"`
 
 	GeneratedOut GeneratedOut `embed:""`
 
