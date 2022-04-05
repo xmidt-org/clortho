@@ -14,14 +14,32 @@ import (
 )
 
 const (
+	// StreamPath is the value for a path that indicates either stdin or stdout,
+	// depending upon the context.
 	StreamPath = "-"
 
-	FormatPEM    = "pem"
-	FormatJWK    = "jwk"
+	// FormatPEM is the command line flag value to explicitly select PEM for key output.
+	FormatPEM = "pem"
+
+	// FormatJWK is the command line flag value to explicitly select JWK for key output.
+	// Note that even if this is supplied, output may be a JWK set instead when the generated
+	// key is being appended to an existing set.
+	FormatJWK = "jwk"
+
+	// FormatJWKSet is the command line flag value to explicitly select a JWK set for key output.
+	// This is the default in most cases.  When used with a single key, the output will be a
+	// JWK set with (1) element.
 	FormatJWKSet = "jwk-set"
 
-	SuffixPEM    = ".pem"
-	SuffixJWK    = ".jwk"
+	// SuffixPEM is the system file suffix for the PEM format.
+	SuffixPEM = ".pem"
+
+	// SuffixJWK is the system file suffix for the JWK format.  Files of this type
+	// are also allowed to contain JWK sets.
+	SuffixJWK = ".jwk"
+
+	// SuffixJWKSet is the system file suffix for the JWK set format.  Files of this type
+	// must contain a set and cannot contain a single JWK key.
 	SuffixJWKSet = ".jwk-set"
 )
 
@@ -37,6 +55,8 @@ var formats = map[string]bool{
 	FormatJWKSet: true,
 }
 
+// IsJSON tests the given data to see if it's JSON.  If this function returns
+// false, PEM is assumed.
 func IsJSON(data []byte) bool {
 	for _, c := range data {
 		// fast whitespace detection
