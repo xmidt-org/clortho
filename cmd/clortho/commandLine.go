@@ -192,6 +192,7 @@ func (o *OKP) AfterApply(ctx *kong.Context, random io.Reader) (err error) {
 	return
 }
 
+// CommandLine is the main command line driver.
 type CommandLine struct {
 	RSA RSA `cmd:"" name:"RSA" help:"Generates RSA keys"`
 	EC  EC  `cmd:"" name:"EC" help:"Generates elliptic curve keys"`
