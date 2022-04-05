@@ -141,25 +141,22 @@ func (w Writer) determineOutFormat(inFormat string) (format string, err error) {
 	format = FormatJWKSet // the default
 
 	switch {
-	// if the user explicitly specified an output format, use that
 	case len(w.Format) > 0:
+		// if the user explicitly specified an output format, use that
 		format = w.Format
 
-	// if writing to stdout and appending to an existing set,
-	// use the format of the existing set
-	case w.Path == StreamPath && len(inFormat) > 0:
+	case len(inFormat) > 0:
+		// ... then fallback to the detected format from the keys being appended to
 		format = inFormat
 
-	// if writing to a system file, try to use the file suffix to
-	// determine the format.  failing that, use the format of the
-	// existing set.  failing that, fallback to jwk-set
-	case w.Path != StreamPath:
-		format = suffixToFormat[filepath.Ext(w.Path)]
-		switch {
-		case len(format) == 0 && len(inFormat) > 0:
-			format = inFormat
+	case w.Path == StreamPath:
+		format = FormatJWKSet
 
-		case len(format) == 0:
+	default:
+		// if writing to a system file, try to use the file suffix to
+		// determine the format.  failing that, fallback to jwk-set.
+		format = suffixToFormat[filepath.Ext(w.Path)]
+		if len(format) == 0 {
 			format = FormatJWKSet
 		}
 	}
