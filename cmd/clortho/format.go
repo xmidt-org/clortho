@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,13 +11,27 @@ import (
 )
 
 const (
+	StreamPath = "-"
+
 	FormatPEM    = "pem"
 	FormatJWK    = "jwk"
 	FormatJWKSet = "jwk-set"
+
+	SuffixPEM    = ".pem"
+	SuffixJWK    = ".jwk"
+	SuffixJWKSet = ".jwk-set"
 )
 
-func IsFile(path string) bool {
-	return len(path) > 0 && path != "-"
+var suffixToFormat = map[string]string{
+	SuffixPEM:    FormatPEM,
+	SuffixJWK:    FormatJWK,
+	SuffixJWKSet: FormatJWKSet,
+}
+
+var formats = map[string]bool{
+	FormatPEM:    true,
+	FormatJWK:    true,
+	FormatJWKSet: true,
 }
 
 func IsJSON(data []byte) bool {
@@ -33,79 +48,162 @@ func IsJSON(data []byte) bool {
 	return false
 }
 
-func ReadSetFile(path string) (jwk.Set, error) {
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
+func ReadSetFile(name string) (format string, set jwk.Set, err error) {
+	var f *os.File
+	f, err = os.Open(name)
+	if err == nil {
+		defer f.Close()
+		format, set, err = ReadSet(f)
 	}
 
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+	return
+}
+
+func ReadSet(r io.Reader) (format string, set jwk.Set, err error) {
+	var data []byte
+	data, err = io.ReadAll(r)
+	if err == nil {
+		format, set, err = ReadSetBytes(data)
 	}
 
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
+	return
+}
 
+func ReadSetBytes(data []byte) (format string, set jwk.Set, err error) {
 	switch {
+	case len(data) == 0:
+		format = FormatJWKSet
+		set = jwk.NewSet()
+
 	case IsJSON(data):
-		// There's a bug in jwk.Parse:  when passed a single key, it does not
-		// work as intended.  The JWK set contains all the fields of the original
-		// key parsed, along with a keys array.
+		// NOTE: there's a bug in github.com/lestrrat-go/jwx/jwk.  jwk.Parse
+		// will result in a jwk.Set with the key material as JSON fields at the same
+		// level as keys due to how the unmarshalling is implemented.
 		//
-		// Workaround:  try parsing this as a key first, then as a set.
-		key, err := jwk.ParseKey(data)
+		// To work around this, we first try and parse it as a key, then as a set.
+		var key jwk.Key
+		key, err = jwk.ParseKey(data)
 		if err == nil {
-			set := jwk.NewSet()
+			format = FormatJWK // single key
+			set = jwk.NewSet()
 			set.Add(key)
-			return set, nil
+		} else {
+			format = FormatJWKSet
+			set, err = jwk.Parse(data)
 		}
 
-		return jwk.Parse(data)
-
-	case len(data) > 0:
-		return jwk.Parse(data, jwk.WithPEM(true))
-
 	default:
-		return jwk.NewSet(), nil
+		format = FormatPEM
+		set, err = jwk.Parse(data, jwk.WithPEM(true))
 	}
+
+	return
 }
 
-func WriteSetFile(set jwk.Set, format, path string) error {
-	var err error
-	path, err = filepath.Abs(path)
-	if err != nil {
-		return err
+// CheckFormat asserts that v is a valid format, returning an error if not.
+func CheckFormat(v string) error {
+	if _, ok := formats[v]; ok {
+		return nil
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-	return WriteSet(set, format, f)
+	return fmt.Errorf("%s is not a valid format", v)
 }
 
-func WriteSet(set jwk.Set, format string, o io.Writer) (err error) {
-	var data []byte
+type Writer struct {
+	Stdout io.Writer
+	Stdin  io.Reader
+	Path   string
+	Append bool
+	Format string
+}
+
+func (w Writer) readAppendSet() (inFormat string, set jwk.Set, err error) {
 	switch {
-	case format == FormatPEM:
-		data, err = jwk.Pem(set)
+	case w.Append && w.Path == StreamPath && w.Stdin != nil:
+		inFormat, set, err = ReadSet(w.Stdin)
 
-	case format == FormatJWK && set.Len() == 1:
-		key, _ := set.Get(0)
-		data, err = json.MarshalIndent(key, "", "\t")
+	case w.Append && w.Path != StreamPath:
+		inFormat, set, err = ReadSetFile(w.Path)
 
 	default:
-		data, err = json.MarshalIndent(set, "", "\t")
+		// leave inFormat unset
+		set = jwk.NewSet()
+	}
+
+	return
+}
+
+func (w Writer) determineOutFormat(inFormat string) (format string, err error) {
+	format = FormatJWKSet // the default
+
+	switch {
+	// if the user explicitly specified an output format, use that
+	case len(w.Format) > 0:
+		format = w.Format
+
+	// if writing to stdout and appending to an existing set,
+	// use the format of the existing set
+	case w.Path == StreamPath && len(inFormat) > 0:
+		format = inFormat
+
+	// if writing to a system file, try to use the file suffix to
+	// determine the format.  failing that, use the format of the
+	// existing set.  failing that, fallback to jwk-set
+	case w.Path != StreamPath:
+		format = suffixToFormat[filepath.Ext(w.Path)]
+		switch {
+		case len(format) == 0 && len(inFormat) > 0:
+			format = inFormat
+
+		case len(format) == 0:
+			format = FormatJWKSet
+		}
+	}
+
+	err = CheckFormat(format)
+	return
+}
+
+func (w Writer) WriteKey(key jwk.Key) (err error) {
+	var (
+		inFormat  string
+		outFormat string
+		set       jwk.Set
+		data      []byte
+	)
+
+	inFormat, set, err = w.readAppendSet()
+	if err == nil {
+		set.Add(key)
+		outFormat, err = w.determineOutFormat(inFormat)
 	}
 
 	if err == nil {
-		_, err = o.Write(data)
+		switch {
+		case outFormat == FormatPEM:
+			data, err = jwk.Pem(set)
+
+		case outFormat == FormatJWK && set.Len() == 1:
+			// can only write a single key if there was nothing to append to
+			data, err = json.MarshalIndent(key, "", "\t")
+
+		default:
+			// by default, write a jwk set
+			data, err = json.MarshalIndent(set, "", "\t")
+		}
+	}
+
+	if err == nil {
+		if w.Path == StreamPath {
+			_, err = w.Stdout.Write(data)
+		} else {
+			var f *os.File
+			f, err = os.OpenFile(w.Path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+			if err == nil {
+				defer f.Close()
+				_, err = f.Write(data)
+			}
+		}
 	}
 
 	return

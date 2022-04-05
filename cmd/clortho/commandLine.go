@@ -9,16 +9,72 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	mrand "math/rand"
+	"os"
+	"path/filepath"
 
 	"github.com/alecthomas/kong"
 	"github.com/lestrrat-go/jwx/jwk"
 	"github.com/lestrrat-go/jwx/x25519"
 )
 
+// PublicOut is the common set of command flags that control how the public portion
+// of the generated key is written.  By default, the public key isn't written separately.
+type PublicOut struct {
+	PubOutput string `placeholder:"FILE" xor:"pub-output,pub-append" help:"file to output the public portion of the generated key.  '-' indicates stdout.  if neither --pub-output nor --pub-append are specified, the public key will not be written separately.  this cannot refer to the same location as the generated private key."`
+	PubAppend string `placeholder:"FILE" xor:"pub-output,pub-append" help:"file to which the generated public key will be appended.  '-' indicates reading public keys from stdin, appending the generated public key, then writing out the set to stdout.  this cannot refer to the same location as the generated private key."`
+	PubFormat string `placeholder:"FORMAT" help:"the output format for the public key, one of pem, jwk, or jwk-set.  if not supplied, the output format will be detected from the output file suffix or, if output is going to stdout, the format of the keys being appended to (if any).  jwk-set is used if no format can be detected."`
+}
+
+// path returns the path information describing where the public key is to be written.
+// By default, the returned path will be the empty string, indicating that no separate
+// public key output should occur.
+func (pout PublicOut) path() (path string, isAppend bool, err error) {
+	switch {
+	case len(pout.PubAppend) > 0:
+		isAppend = true
+		path, err = filepath.Abs(pout.PubAppend)
+
+	case pout.PubOutput == StreamPath:
+		path = StreamPath
+
+	case len(pout.PubOutput) > 0:
+		path, err = filepath.Abs(pout.PubOutput)
+	}
+
+	return
+}
+
+// GeneratedOut is the common flags governing how a generated key is output.  By default, output
+// is sent to stdout and the format is jwk-set.
+type GeneratedOut struct {
+	Output string `placeholder:"FILE" short:"o" xor:"output,append" help:"file to output the generated key.  '-' indicates stdout, which is the default."`
+	Append string `placeholder:"FILE" short:"a" xor:"output,append" help:"file to append the generated key.  '-' indicates reading keys from stdin, appending the generated key, then writing the resulting set to stdout."`
+	Format string `placeholder:"FORMAT" short:"f" help:"the output format for the generated private key, one of pem, jwk, or jwk-set.  if not supplied, the output format will be detected from the output file suffix or, if output is going to stdout, the format of the keys being appended to (if any).  jwk-set is used if no format can be detected."`
+}
+
+// path returns the location information controlling where the generated key is output.
+// By default, the returned path will be StreamPath, indicated stdout.
+func (gout GeneratedOut) path() (path string, isAppend bool, err error) {
+	switch {
+	case len(gout.Append) > 0:
+		isAppend = true
+		path, err = filepath.Abs(gout.Append)
+
+	case gout.Output == "" || gout.Output == StreamPath:
+		// by default, write the key to stdout
+		path = StreamPath
+
+	default:
+		path, err = filepath.Abs(gout.Output)
+	}
+
+	return
+}
+
 type RSA struct {
-	Size uint `short:"s" default:"256" help:"the size of the key to generate, in bits"`
+	Size      uint      `short:"s" default:"256" help:"the size of the key to generate, in bits"`
+	PublicOut PublicOut `embed:""`
 }
 
 func (r *RSA) AfterApply(ctx *kong.Context, random io.Reader) error {
@@ -33,12 +89,13 @@ func (r *RSA) AfterApply(ctx *kong.Context, random io.Reader) error {
 	}
 
 	ctx.BindTo(key, (*jwk.Key)(nil))
+	ctx.Bind(&r.PublicOut)
 	return nil
 }
 
 type EC struct {
-	Curve  string `name:"crv" default:"P-256" enum:"P-256,P-384,P-521" help:"the elliptic curve to use"`
-	Public string `help:"the output file for the public key.  if not supplied, the public key is not output separately.  if --format was not supplied, the format is deduced from this file's extension."`
+	Curve     string    `name:"crv" default:"P-256" enum:"P-256,P-384,P-521" help:"the elliptic curve to use"`
+	PublicOut PublicOut `embed:""`
 }
 
 func (e *EC) AfterApply(ctx *kong.Context, random io.Reader) error {
@@ -71,6 +128,7 @@ func (e *EC) AfterApply(ctx *kong.Context, random io.Reader) error {
 	}
 
 	ctx.BindTo(key, (*jwk.Key)(nil))
+	ctx.Bind(&e.PublicOut)
 	return nil
 }
 
@@ -96,11 +154,13 @@ func (o *Oct) AfterApply(ctx *kong.Context, random io.Reader) error {
 	}
 
 	ctx.BindTo(key, (*jwk.Key)(nil))
+	ctx.Bind((*PublicOut)(nil))
 	return nil
 }
 
 type OKP struct {
-	Curve string `name:"crv" default:"Ed25519" enum:"Ed25519,X25519" help:"the elliptic curve to use"`
+	Curve     string    `name:"crv" default:"Ed25519" enum:"Ed25519,X25519" help:"the elliptic curve to use"`
+	PublicOut PublicOut `embed:""`
 }
 
 func (o *OKP) AfterApply(ctx *kong.Context, random io.Reader) (err error) {
@@ -124,6 +184,7 @@ func (o *OKP) AfterApply(ctx *kong.Context, random io.Reader) (err error) {
 		ctx.BindTo(key, (*jwk.Key)(nil))
 	}
 
+	ctx.Bind(&o.PublicOut)
 	return
 }
 
@@ -133,15 +194,13 @@ type CommandLine struct {
 	Oct Oct `cmd:"" name:"oct"`
 	OKP OKP `cmd:"" name:"OKP"`
 
+	GeneratedOut GeneratedOut `embed:""`
+
 	KeyID      string     `name:"kid" help:"the key id"`
 	KeyUsage   string     `name:"use" help:"the intended usage for the key, e.g. sig or enc"`
 	KeyOps     []string   `name:"key_ops" help:"the set of key operations.  duplicate values are not allowed."`
 	Algorithm  string     `name:"alg" help:"the algorithm the generated key is intended to be used with."`
 	Attributes Attributes `help:"additional, nonstandard attributes.  supplying any standard JWK attributes results in an error.  values that parse as numbers as added as such.  values enclosed in single quotes are always added as strings."`
-
-	Output string `short:"o" xor:"output,append" placeholder:"FILE" help:"file to write the generated key.  '-' indicates stdout, which is also used if neither --output or --append is supplied.  if this is a system file, it will be created or overwritten as needed."`
-	Append string `short:"a" xor:"output,append" placeholder:"FILE" help:"file to which the generated key is appended.  this file must exist and cannot be stdout."`
-	Format string `short:"f" placeholder:"FORMAT" enum:"pem,jwk,jwk-set" default:"jwk" help:"the output format of the key, which will be a jwk-set by default. even if jwk is used, a jwk-set will still be output if the generated key is appended to any --in sources."`
 
 	Seed int64 `help:"the RNG seed for key generation, used primarily for testing with consistent output.  DO NOT USE FOR PRODUCTION KEYS."`
 }
@@ -175,26 +234,6 @@ func (cli *CommandLine) AfterApply(k *kong.Kong, ctx *kong.Context) error {
 			(*io.Reader)(nil),
 		)
 	}
-
-	var set jwk.Set
-	if len(cli.Append) > 0 {
-		var err error
-		set, err = ReadSetFile(cli.Append)
-
-		// treat nonexistent files for appending as if they were simply empty
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-	}
-
-	if set == nil {
-		set = jwk.NewSet()
-	}
-
-	ctx.BindTo(
-		set,
-		(*jwk.Set)(nil),
-	)
 
 	return nil
 }
@@ -230,23 +269,51 @@ func (cli *CommandLine) setAttributes(generatedKey jwk.Key) error {
 
 // Run handles adding any common attributes to the key created by the subcommand.
 // This method also handles writing the private key as requested by the CLI options.
-func (cli *CommandLine) Run(k *kong.Kong, ctx *kong.Context, set jwk.Set, generatedKey jwk.Key) error {
-	if err := cli.setAttributes(generatedKey); err != nil {
-		return err
+func (cli *CommandLine) Run(k *kong.Kong, ctx *kong.Context, p *PublicOut, generatedKey jwk.Key) (err error) {
+	var (
+		outPath  string
+		isAppend bool
+	)
+
+	err = cli.setAttributes(generatedKey)
+	if err == nil {
+		outPath, isAppend, err = cli.GeneratedOut.path()
 	}
 
-	set.Add(generatedKey)
+	if err == nil && p != nil {
+		var (
+			pubOutPath  string
+			pubIsAppend bool
+			pubKey      jwk.Key
+		)
 
-	switch {
-	case len(cli.Append) > 0:
-		return WriteSetFile(set, cli.Format, cli.Append)
-
-	case IsFile(cli.Output):
-		return WriteSetFile(set, cli.Format, cli.Output)
-
-	default:
-		return WriteSet(set, cli.Format, k.Stdout)
+		pubOutPath, pubIsAppend, err = p.path()
+		if err == nil && len(pubOutPath) > 0 {
+			if pubOutPath == outPath {
+				err = errors.New("Cannot use the same location for both the private and public keys")
+			} else if pubKey, err = generatedKey.PublicKey(); err == nil {
+				err = Writer{
+					Stdout: k.Stdout,
+					Stdin:  os.Stdin,
+					Path:   pubOutPath,
+					Append: pubIsAppend,
+					Format: p.PubFormat,
+				}.WriteKey(pubKey)
+			}
+		}
 	}
+
+	if err == nil {
+		err = Writer{
+			Stdout: k.Stdout,
+			Stdin:  os.Stdin,
+			Path:   outPath,
+			Append: isAppend,
+			Format: cli.GeneratedOut.Format,
+		}.WriteKey(generatedKey)
+	}
+
+	return
 }
 
 func newParser() *kong.Kong {
