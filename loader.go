@@ -33,14 +33,6 @@ import (
 	"go.uber.org/multierr"
 )
 
-const (
-	// DefaultHTTPFormat is the format assumed when an HTTP response does not specify a Content-Type.
-	DefaultHTTPFormat = "application/json"
-
-	// DefaultFileFormat is the format assumed when no format can be deduced from a file.
-	DefaultFileFormat = ".pem"
-)
-
 type UnsupportedLocationError struct {
 	Location string
 }
@@ -137,7 +129,7 @@ func NewLoader(options ...LoaderOption) (Loader, error) {
 				"http":  hl,
 				"https": hl,
 				"file":  fl,
-				"":      fl,
+				"":      fl, // the default, when no scheme is present in the URI
 			},
 		}
 	)
