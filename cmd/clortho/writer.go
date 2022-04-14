@@ -2,18 +2,18 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
-	"github.com/lestrrat-go/jwx/jwa"
 	"github.com/lestrrat-go/jwx/jwk"
 )
 
 const (
+	// DefaultPath is the value indicating to take the default behavior, which
+	// is different depending upon context.
+	DefaultPath = ""
+
 	// StreamPath is the value for a path that indicates either stdin or stdout,
 	// depending upon the context.
 	StreamPath = "-"
@@ -71,12 +71,13 @@ func IsJSON(data []byte) bool {
 	return false
 }
 
-// ReadSetBytes reads the JWK set from a byte slice.  The format is determined by
-// looking at the content, e.g. PEM, jwk, or jwk-set.
-func ReadSetBytes(data []byte) (format string, set jwk.Set, err error) {
+// unmarshalSet performs the common behavior for reading in a JWK set for appending.
+// If the data is empty (or nil), then the detectedFormat is returned as FormatJWKSet
+// and a non-nil, empty jwk.Set is returned.
+func unmarshalSet(data []byte) (detectedFormat string, set jwk.Set, err error) {
 	switch {
 	case len(data) == 0:
-		format = FormatJWKSet
+		detectedFormat = FormatJWKSet
 		set = jwk.NewSet()
 
 	case IsJSON(data):
@@ -88,157 +89,176 @@ func ReadSetBytes(data []byte) (format string, set jwk.Set, err error) {
 		var key jwk.Key
 		key, err = jwk.ParseKey(data)
 		if err == nil {
-			format = FormatJWK // single key
+			detectedFormat = FormatJWK // single key
 			set = jwk.NewSet()
 			set.Add(key)
 		} else {
-			format = FormatJWKSet
+			detectedFormat = FormatJWKSet
 			set, err = jwk.Parse(data)
 		}
 
 	default:
-		format = FormatPEM
+		detectedFormat = FormatPEM
 		set, err = jwk.Parse(data, jwk.WithPEM(true))
 	}
 
 	return
 }
 
-// Writer provides the logic for writing keys.
-type Writer struct {
-	// Stdout is the stream to use for non-file output.
-	Stdout io.Writer
+// Reader is the strategy for reading a key set for appending.
+type Reader interface {
+	// Path returns the file system location this reader uses.  If StreamPath,
+	// then data is read from stdin.  If DefaultPath, this reader doesn't read
+	// any data, instead returning an empty set.
+	Path() string
 
-	// Stdin is the stream to use for non-file input.
-	Stdin io.Reader
-
-	// Path is the location where the key is written.  This is also the location
-	// to which the key is appended, if Append is true.
-	//
-	// If a system file, this field should have filepath.Abs called on it prior
-	// to invoking any methods of this type.  This enables simpler debugging.
-	Path string
-
-	// Append indicates whether a written key will be appended to the existing
-	// contents of Path.  If this field is true, then Path will be read and parsed
-	// as a JWK set, then the key will be appended to that set.
-	Append bool
-
-	// Format is the desired output format of the key or set.  If empty, the format
-	// is determined dynamically:  If Append is true, then the parsed format of the contents
-	// of Path is used.  Otherwise, output defaults to jwk-set format, even for a single key.
-	Format string
+	// ReadSet reads the set to which the generated key should be appended.
+	// The returned set will always be non-nil if the error is nil, though
+	// the set can be empty if the source is empty or doesn't exist.
+	ReadSet() (detectedFormat string, set jwk.Set, err error)
 }
 
-func (w Writer) readAppendSet() (inFormat string, set jwk.Set, err error) {
-	var data []byte
-	switch {
-	case w.Append && w.Path == StreamPath && w.Stdin != nil:
-		data, err = io.ReadAll(w.Stdin)
+// NewReader constructs a Reader appropriate for the given path and configured stdin.
+func NewReader(stdin io.Reader, path string) (r Reader, err error) {
+	switch path {
+	case DefaultPath:
+		// by default, don't append to anything
+		r = nilReader{}
 
-	case w.Append && w.Path != StreamPath:
-		var f *os.File
-		f, err = os.Open(w.Path)
-		if err == nil {
-			defer f.Close()
-			data, err = io.ReadAll(f)
-		} else if errors.Is(err, fs.ErrNotExist) {
-			err = nil // ignore when the file doesn't exist
-		}
-	}
-
-	if err == nil && len(data) > 0 {
-		inFormat, set, err = ReadSetBytes(data)
-	} else {
-		// for an empty or nonexistent file, assume an empty set
-		set = jwk.NewSet()
-	}
-
-	return
-}
-
-func (w Writer) determineOutFormat(inFormat string) (format string, err error) {
-	format = FormatJWKSet // the default
-
-	switch {
-	case len(w.Format) > 0:
-		// if the user explicitly specified an output format, use that
-		format = w.Format
-
-	case len(inFormat) > 0:
-		// ... then fallback to the detected format from the keys being appended to
-		format = inFormat
-
-	case w.Path == StreamPath:
-		format = FormatJWKSet
+	case StreamPath:
+		r = stdinReader{stdin: stdin}
 
 	default:
-		// if writing to a system file, try to use the file suffix to
-		// determine the format.  failing that, fallback to jwk-set.
-		format = suffixToFormat[filepath.Ext(w.Path)]
-		if len(format) == 0 {
-			format = FormatJWKSet
+		path, err = filepath.Abs(path)
+		if err == nil {
+			r = pathReader{path: path}
 		}
-	}
-
-	if _, ok := formats[format]; !ok {
-		err = fmt.Errorf("%s is not a valid format", format)
 	}
 
 	return
 }
 
-// WriteKey outputs the given key, appending it to any existing set as necessary.
-// This method will read the Path file if appending is required.
-func (w Writer) WriteKey(key jwk.Key) (err error) {
+type nilReader struct{}
+
+func (nr nilReader) Path() string { return DefaultPath }
+
+func (nr nilReader) ReadSet() (string, jwk.Set, error) {
+	return unmarshalSet(nil)
+}
+
+type stdinReader struct {
+	stdin io.Reader
+}
+
+func (sr stdinReader) Path() string { return StreamPath }
+
+func (sr stdinReader) ReadSet() (string, jwk.Set, error) {
+	data, err := io.ReadAll(sr.stdin)
+	if err == nil {
+		return unmarshalSet(data)
+	}
+
+	return "", nil, err
+}
+
+type pathReader struct {
+	path string
+}
+
+func (pr pathReader) Path() string { return pr.path }
+
+func (pr pathReader) ReadSet() (detectedFormat string, set jwk.Set, err error) {
+	var data []byte
+	data, err = os.ReadFile(pr.path)
+	if err == nil {
+		detectedFormat, set, err = unmarshalSet(data)
+	}
+
+	return
+}
+
+// marshalSet marshals the set using the supplied format.
+func marshalSet(format string, set jwk.Set) (data []byte, err error) {
+	switch {
+	case format == FormatPEM:
+		data, err = jwk.Pem(set)
+
+	case format == FormatJWK && set.Len() == 1:
+		key, _ := set.Get(0)
+		data, err = json.MarshalIndent(key, "", "\t")
+
+	default:
+		data, err = json.MarshalIndent(set, "", "\t")
+	}
+
+	return
+}
+
+// Writer provides the logic for writing keys.
+type Writer interface {
+	Path() string
+
+	// WriteSet writes the given set to the output.  This method honors FormatJWK
+	// if and only if set has exactly (1) key.
+	WriteSet(format string, set jwk.Set) error
+}
+
+// NewWriter produces a Writer that outputs keys to either path or stdout,
+// depending on whether path is a system file.
+func NewWriter(stdout io.Writer, path string) (w Writer, err error) {
+	switch path {
+	case DefaultPath:
+		fallthrough
+
+	case StreamPath:
+		w = stdoutWriter{stdout: stdout}
+
+	default:
+		path, err = filepath.Abs(path)
+		if err == nil {
+			w = pathWriter{path: path}
+		}
+	}
+
+	return
+}
+
+type stdoutWriter struct {
+	stdout io.Writer
+}
+
+func (sw stdoutWriter) Path() string { return StreamPath }
+
+func (sw stdoutWriter) WriteSet(format string, set jwk.Set) (err error) {
+	var data []byte
+	data, err = marshalSet(format, set)
+	if err == nil {
+		_, err = sw.stdout.Write(data)
+	}
+
+	return
+}
+
+type pathWriter struct {
+	path string
+}
+
+func (pw pathWriter) Path() string { return pw.path }
+
+func (pw pathWriter) WriteSet(format string, set jwk.Set) (err error) {
 	var (
-		inFormat  string
-		outFormat string
-		set       jwk.Set
-		data      []byte
+		data []byte
+		f    *os.File
 	)
 
-	inFormat, set, err = w.readAppendSet()
+	data, err = marshalSet(format, set)
 	if err == nil {
-		set.Add(key)
-		outFormat, err = w.determineOutFormat(inFormat)
+		f, err = os.OpenFile(pw.path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	}
 
 	if err == nil {
-		switch {
-		case outFormat == FormatPEM:
-			switch key.KeyType() {
-			case jwa.RSA:
-				fallthrough
-
-			case jwa.EC:
-				data, err = jwk.Pem(set)
-
-			default:
-				err = fmt.Errorf("Keys of type '%s' cannot be written as PEM blocks", key.KeyType())
-			}
-
-		case outFormat == FormatJWK && set.Len() == 1:
-			// can only write a single key if there was nothing to append to
-			data, err = json.MarshalIndent(key, "", "\t")
-
-		default:
-			// by default, write a jwk set
-			data, err = json.MarshalIndent(set, "", "\t")
-		}
-	}
-
-	if err == nil {
-		if w.Path == StreamPath {
-			_, err = w.Stdout.Write(data)
-		} else {
-			var f *os.File
-			f, err = os.OpenFile(w.Path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
-			if err == nil {
-				defer f.Close()
-				_, err = f.Write(data)
-			}
-		}
+		defer f.Close()
+		_, err = f.Write(data)
 	}
 
 	return
