@@ -95,6 +95,8 @@ type Parser interface {
 	Parse(format string, data []byte) ([]Key, error)
 }
 
+// parsers is the internal implementation of Parser.  It allows for a configurable set
+// of parsers based on format.
 type parsers struct {
 	p map[string]Parser
 }
@@ -126,6 +128,8 @@ func (ps *parsers) Parse(format string, content []byte) ([]Key, error) {
 // to register a Parser for a new, custom format.
 func NewParser(options ...ParserOption) (Parser, error) {
 	var (
+		err error
+
 		jsp = JWKSetParser{}
 
 		jp = JWKKeyParser{}
@@ -153,7 +157,6 @@ func NewParser(options ...ParserOption) (Parser, error) {
 		}
 	)
 
-	var err error
 	for _, o := range options {
 		multierr.Append(err, o.applyToParsers(ps))
 	}

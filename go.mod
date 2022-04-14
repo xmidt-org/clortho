@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/lestrrat-go/jwx v1.2.20
+	github.com/xmidt-org/chronon v0.1.1
 	go.uber.org/multierr v1.8.0
 )
 
