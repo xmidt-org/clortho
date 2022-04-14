@@ -18,50 +18,9 @@
 package clortho
 
 import (
-	"fmt"
-
 	"github.com/lestrrat-go/jwx/jwk"
 	"go.uber.org/multierr"
 )
-
-const (
-	// MediaTypeJSON is the media type for JSON data.  By default, content with this media type
-	// may contain either a single JWK or a JWK set.
-	MediaTypeJSON = "application/json"
-
-	// SuffixJSON is the file suffix for JSON data.  By default, files with this suffix may
-	// contain either a single JWK or a JWK Set.
-	SuffixJSON = ".json"
-
-	// MediaTypeJWK is the media type for a single JWK.
-	MediaTypeJWK = "application/jwk+json"
-
-	// SuffixJWK is the file suffix for a single JWK.
-	SuffixJWK = ".jwk"
-
-	// MediaTypeJWKSet is the media type for a JWK set.
-	MediaTypeJWKSet = "application/jwk-set+json"
-
-	// SuffixJWKSet is the file suffix for a JWK set.
-	SuffixJWKSet = ".jwk-set"
-
-	// MediaTypePEM is the media type for a PEM-encoded key.
-	MediaTypePEM = "application/x-pem-file"
-
-	// SuffixPEM is the file suffix for a PEM-encoded key.
-	SuffixPEM = ".pem"
-)
-
-// UnsupportedFormatError indicates that a format (media type or file suffix) was passed
-// to Parse which had no associated Parser.
-type UnsupportedFormatError struct {
-	Format string
-}
-
-// Error fulfills the error interface.
-func (ufe *UnsupportedFormatError) Error() string {
-	return fmt.Sprintf("Unsupported key format: %s", ufe.Format)
-}
 
 // ParserOption allows tailoring of the Parser returned by NewParser.
 type ParserOption interface {
@@ -95,6 +54,8 @@ type Parser interface {
 	Parse(format string, data []byte) ([]Key, error)
 }
 
+// parsers is the internal implementation of Parser.  It allows for a configurable set
+// of parsers based on format.
 type parsers struct {
 	p map[string]Parser
 }
@@ -126,6 +87,8 @@ func (ps *parsers) Parse(format string, content []byte) ([]Key, error) {
 // to register a Parser for a new, custom format.
 func NewParser(options ...ParserOption) (Parser, error) {
 	var (
+		err error
+
 		jsp = JWKSetParser{}
 
 		jp = JWKKeyParser{}
@@ -153,7 +116,6 @@ func NewParser(options ...ParserOption) (Parser, error) {
 		}
 	)
 
-	var err error
 	for _, o := range options {
 		multierr.Append(err, o.applyToParsers(ps))
 	}

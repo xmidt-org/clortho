@@ -33,14 +33,6 @@ import (
 	"go.uber.org/multierr"
 )
 
-const (
-	// DefaultHTTPFormat is the format assumed when an HTTP response does not specify a Content-Type.
-	DefaultHTTPFormat = "application/json"
-
-	// DefaultFileFormat is the format assumed when no format can be deduced from a file.
-	DefaultFileFormat = ".pem"
-)
-
 type UnsupportedLocationError struct {
 	Location string
 }
@@ -69,11 +61,11 @@ func (hle *HTTPLoaderError) Error() string {
 type ContentMeta struct {
 	Format       string
 	TTL          time.Duration
-	Expiry       time.Time
 	LastModified time.Time
-	Tag          string
 }
 
+// HTTPClient is the minimal interface required by a component which can handle
+// HTTP transactions with a server.  *http.Client implements this interface.
 type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
@@ -82,6 +74,7 @@ type HTTPClient interface {
 // prior to issuing it through a client.
 type HTTPEncoder func(context.Context, *http.Request) error
 
+// LoaderOption represents a configurable option for building a Loader.
 type LoaderOption interface {
 	applyToLoaders(*loaders) error
 }
@@ -90,6 +83,10 @@ type loaderOptionFunc func(*loaders) error
 
 func (lof loaderOptionFunc) applyToLoaders(ls *loaders) error { return lof(ls) }
 
+// WithSchemes registers a loader as handling one or more URI schemes.  Use this
+// to add custom schemes or to override one of the schemes a loader handles by default.
+//
+// By default, a Loader handles the file, http, and https schemes.
 func WithSchemes(l Loader, schemes ...string) LoaderOption {
 	return loaderOptionFunc(func(ls *loaders) error {
 		for _, s := range schemes {
@@ -114,9 +111,11 @@ type Loader interface {
 // NewLoader builds a Loader from a set of options.
 //
 // By default, the returned Loader handles http, https, and file locations.  The default
-// loader is a file loader.
+// loader, when there is no scheme, is a file loader.
 func NewLoader(options ...LoaderOption) (Loader, error) {
 	var (
+		err error
+
 		hl = HTTPLoader{
 			Client: http.DefaultClient,
 		}
@@ -130,12 +129,11 @@ func NewLoader(options ...LoaderOption) (Loader, error) {
 				"http":  hl,
 				"https": hl,
 				"file":  fl,
-				"":      fl,
+				"":      fl, // the default, when no scheme is present in the URI
 			},
 		}
 	)
 
-	var err error
 	for _, o := range options {
 		err = multierr.Append(err, o.applyToLoaders(ls))
 	}
@@ -199,10 +197,6 @@ func (hl *HTTPLoader) newRequest(ctx context.Context, location string, meta Cont
 		if !meta.LastModified.IsZero() {
 			request.Header.Set("If-Modified-Since", meta.LastModified.Format(time.RFC1123))
 		}
-
-		if len(meta.Tag) > 0 {
-			request.Header.Set("If-None-Match", meta.Tag)
-		}
 	}
 
 	return
@@ -256,7 +250,6 @@ func (hl *HTTPLoader) newMeta(response *http.Response) (meta ContentMeta) {
 		meta.Format = DefaultHTTPFormat
 	}
 
-	meta.Tag = response.Header.Get("ETag") // can be the empty string
 	var err error
 
 	if lastModified := response.Header.Get("Last-Modified"); len(lastModified) > 0 {
@@ -280,12 +273,6 @@ func (hl *HTTPLoader) newMeta(response *http.Response) (meta ContentMeta) {
 				// only use the first max-age directive, in case of duplicates
 				break
 			}
-		}
-	} else if expires := response.Header.Get("Expires"); len(expires) > 0 {
-		// treat an invalid Expires header as if there were no such header
-		meta.Expiry, err = time.Parse(time.RFC1123, expires)
-		if err != nil {
-			meta.Expiry = time.Time{}
 		}
 	}
 
