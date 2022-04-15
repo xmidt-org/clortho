@@ -22,27 +22,6 @@ import (
 	"go.uber.org/multierr"
 )
 
-// ParserOption allows tailoring of the Parser returned by NewParser.
-type ParserOption interface {
-	applyToParsers(*parsers) error
-}
-
-type parserOptionFunc func(*parsers) error
-
-func (pof parserOptionFunc) applyToParsers(ps *parsers) error { return pof(ps) }
-
-// WithFormats associates a Parsers with one or more formats.  Each format must be either
-// a media type ("application/json") or a file suffix with leading period (".json").
-func WithFormats(p Parser, formats ...string) ParserOption {
-	return parserOptionFunc(func(ps *parsers) error {
-		for _, f := range formats {
-			ps.p[f] = p
-		}
-
-		return nil
-	})
-}
-
 // Parser turns raw data into one or more Key instances.
 type Parser interface {
 	// Parse parses data, expected to be in the given format, into zero or more Keys.
@@ -68,6 +47,18 @@ func (ps *parsers) Parse(format string, content []byte) ([]Key, error) {
 	return nil, &UnsupportedFormatError{
 		Format: format,
 	}
+}
+
+var defaultParser Parser
+
+func init() {
+	defaultParser, _ = NewParser()
+}
+
+// DefaultParser returns the singleton default Parser instance, which is equivalent
+// to what would be returned by calling NewParser with no options.
+func DefaultParser() Parser {
+	return defaultParser
 }
 
 // NewParser returns a Parser tailored with the given options.
