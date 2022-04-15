@@ -22,6 +22,7 @@ import (
 	"errors"
 
 	"github.com/jtacoma/uritemplates"
+	"go.uber.org/multierr"
 )
 
 const (
@@ -56,11 +57,19 @@ type Resolver interface {
 //
 // If no URI template is supplied, ResolveKeyID will return an error.
 func NewResolver(options ...ResolverOption) (Resolver, error) {
-	r := &resolver{
-		fetcher: DefaultFetcher(),
+	var (
+		err error
+
+		r = &resolver{
+			fetcher: DefaultFetcher(),
+		}
+	)
+
+	for _, o := range options {
+		err = multierr.Append(err, o.applyToResolver(r))
 	}
 
-	return r, nil
+	return r, err
 }
 
 // resolver is the internal Resolver implementation.
@@ -82,8 +91,17 @@ func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err e
 		})
 	}
 
+	var keys []Key
 	if err == nil {
-		_ = location
+		keys, _, err = r.fetcher.Fetch(ctx, location, ContentMeta{})
+	}
+
+	if err == nil {
+		if len(keys) == 1 {
+			k = keys[0]
+		} else {
+			err = errors.New("TODO")
+		}
 	}
 
 	return
