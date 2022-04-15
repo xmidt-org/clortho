@@ -113,13 +113,12 @@ type Refresher interface {
 }
 
 // NewRefresher constructs a Refresher using the supplied options.  Without any options,
-// a default Refresher is created.
+// the DefaultLoader() and DefaultParser() are used.
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
-		loader: DefaultLoader(),
-		parser: DefaultParser(),
-		clock:  chronon.SystemClock(),
+		fetcher: DefaultFetcher(),
+		clock:   chronon.SystemClock(),
 	}
 
 	for _, o := range options {
@@ -135,8 +134,7 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 
 // refresher is the internal Refresher implementation.
 type refresher struct {
-	loader    Loader
-	parser    Parser
+	fetcher   Fetcher
 	sources   []RefreshSource
 	listeners refreshListeners
 	clock     chronon.Clock
@@ -144,17 +142,6 @@ type refresher struct {
 	taskLock   sync.Mutex
 	taskCancel context.CancelFunc
 	tasks      []*refreshTask
-}
-
-func (r *refresher) fetchKeys(ctx context.Context, location string, prev ContentMeta) (keys []Key, next ContentMeta, err error) {
-	var data []byte
-	data, next, err = r.loader.LoadContent(ctx, location, prev)
-
-	if err == nil {
-		keys, err = r.parser.Parse(next.Format, data)
-	}
-
-	return
 }
 
 func (r *refresher) Start(_ context.Context) error {
@@ -174,10 +161,10 @@ func (r *refresher) Start(_ context.Context) error {
 			jitterHi = int64((1.0 + s.Jitter) * float64(s.Interval))
 
 			task = &refreshTask{
-				source:    s,
-				fetchKeys: r.fetchKeys,
-				dispatch:  r.listeners.dispatch,
-				clock:     r.clock,
+				source:   s,
+				fetcher:  r.fetcher,
+				dispatch: r.listeners.dispatch,
+				clock:    r.clock,
 
 				intervalBase:  jitterLo,
 				intervalRange: jitterHi - jitterLo + 1,
@@ -218,10 +205,10 @@ func (r *refresher) RemoveListener(ch chan<- RefreshEvent) {
 }
 
 type refreshTask struct {
-	source    RefreshSource
-	fetchKeys func(context.Context, string, ContentMeta) ([]Key, ContentMeta, error)
-	dispatch  func(RefreshEvent)
-	clock     chronon.Clock
+	source   RefreshSource
+	fetcher  Fetcher
+	dispatch func(RefreshEvent)
+	clock    chronon.Clock
 
 	// precomputed jitter range
 	intervalBase  int64
@@ -255,7 +242,7 @@ func (rt *refreshTask) run(ctx context.Context) {
 	)
 
 	for {
-		nextKeys, nextMeta, err := rt.fetchKeys(ctx, rt.source.URI, meta)
+		nextKeys, nextMeta, err := rt.fetcher.Fetch(ctx, rt.source.URI, meta)
 		switch {
 		case ctx.Err() != nil:
 			// we were asked to shutdown, and this interrupted the fetch

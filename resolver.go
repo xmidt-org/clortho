@@ -17,7 +17,33 @@
 
 package clortho
 
-import "context"
+import (
+	"context"
+	"errors"
+
+	"github.com/jtacoma/uritemplates"
+)
+
+const (
+	// KeyIDParameter is the name of the URI template parameter for expanding key URIs.
+	KeyIDParameterName = "keyId"
+)
+
+var (
+	// ErrNoTemplate indicates that no URI template is available for that Resolver's method.
+	ErrNoTemplate = errors.New("No URI template expander has been configured for that method.")
+)
+
+// Expander is the strategy for expanding a URI template.
+type Expander interface {
+	// Expand takes a value map and returns the URI resulting from that expansion.
+	Expand(interface{}) (string, error)
+}
+
+// NewExpander constructs an Expander from a URI template.
+func NewExpander(rawTemplate string) (Expander, error) {
+	return uritemplates.Parse(rawTemplate)
+}
 
 // Resolver allows synchronous resolution of keys.
 type Resolver interface {
@@ -25,20 +51,40 @@ type Resolver interface {
 	ResolveKeyID(ctx context.Context, keyID string) (Key, error)
 }
 
+// NewResolver constructs a Resolver from a set of options.  By default, a Resolver
+// uses the DefaultLoader() and DefaultParser().
+//
+// If no URI template is supplied, ResolveKeyID will return an error.
 func NewResolver(options ...ResolverOption) (Resolver, error) {
 	r := &resolver{
-		loader: DefaultLoader(),
-		parser: DefaultParser(),
+		fetcher: DefaultFetcher(),
 	}
 
 	return r, nil
 }
 
+// resolver is the internal Resolver implementation.
 type resolver struct {
-	loader Loader
-	parser Parser
+	fetcher Fetcher
+
+	keyIDExpander Expander
 }
 
-func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (Key, error) {
-	return nil, nil // TODO
+func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
+	if r.keyIDExpander == nil {
+		err = ErrNoTemplate
+	}
+
+	var location string
+	if err == nil {
+		location, err = r.keyIDExpander.Expand(map[string]interface{}{
+			KeyIDParameterName: keyID,
+		})
+	}
+
+	if err == nil {
+		_ = location
+	}
+
+	return
 }

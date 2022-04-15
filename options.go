@@ -63,6 +63,31 @@ func WithFormats(p Parser, formats ...string) ParserOption {
 	})
 }
 
+// FetcherOption is a configuration option passed to NewFetcher.
+type FetcherOption interface {
+	applyToFetcher(*fetcher) error
+}
+
+type fetcherOptionFunc func(*fetcher) error
+
+func (fof fetcherOptionFunc) applyToFetcher(f *fetcher) error {
+	return fof(f)
+}
+
+func WithLoader(l Loader) FetcherOption {
+	return fetcherOptionFunc(func(f *fetcher) error {
+		f.loader = l
+		return nil
+	})
+}
+
+func WithParser(p Parser) FetcherOption {
+	return fetcherOptionFunc(func(f *fetcher) error {
+		f.parser = p
+		return nil
+	})
+}
+
 // ResolverOption represents a configurable option passed to NewResolver.
 type ResolverOption interface {
 	applyToResolver(*resolver) error
@@ -106,46 +131,24 @@ type ResolverRefresherOption interface {
 	RefresherOption
 }
 
-type setLoaderOption struct {
-	l Loader
+type setFetcherOption struct {
+	f Fetcher
 }
 
-func (slo setLoaderOption) applyToRefresher(r *refresher) error {
-	r.loader = slo.l
+func (sfo setFetcherOption) applyToRefresher(r *refresher) error {
+	r.fetcher = sfo.f
 	return nil
 }
 
-func (slo setLoaderOption) applyToResolver(r *resolver) error {
-	r.loader = slo.l
+func (sfo setFetcherOption) applyToResolver(r *resolver) error {
+	r.fetcher = sfo.f
 	return nil
 }
 
-// WithLoader is used to establish the Loader instance used by either
-// a Resolver or Refresher.
-func WithLoader(l Loader) ResolverRefresherOption {
-	return setLoaderOption{
-		l: l,
-	}
-}
-
-type setParserOption struct {
-	p Parser
-}
-
-func (spo setParserOption) applyToRefresher(r *refresher) error {
-	r.parser = spo.p
-	return nil
-}
-
-func (spo setParserOption) applyToResolver(r *resolver) error {
-	r.parser = spo.p
-	return nil
-}
-
-// WithParser establishes the Parser instance used by either a Resolver
-// or Refresher.
-func WithParser(p Parser) ResolverRefresherOption {
-	return setParserOption{
-		p: p,
+// WithFetcher configures the Fetcher instance used by either a Resolver
+// or a Refresher.  By default, DefaultFetcher() is used.
+func WithFetcher(f Fetcher) ResolverRefresherOption {
+	return setFetcherOption{
+		f: f,
 	}
 }
