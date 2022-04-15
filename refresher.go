@@ -85,48 +85,12 @@ func (rl *refreshListeners) dispatch(e RefreshEvent) {
 	}
 }
 
+// RefreshEvent represents a set of keys from a given URI that has been
+// asynchronously fetched.
 type RefreshEvent struct {
 	URI  string
 	Err  error
 	Keys []Key
-}
-
-type RefresherOption interface {
-	applyToRefresher(*refresher) error
-}
-
-type refresherOptionFunc func(*refresher) error
-
-func (rof refresherOptionFunc) applyToRefresher(r *refresher) error {
-	return rof(r)
-}
-
-func WithClock(c chronon.Clock) RefresherOption {
-	return refresherOptionFunc(func(r *refresher) error {
-		r.clock = c
-		return nil
-	})
-}
-
-func WithLoader(l Loader) RefresherOption {
-	return refresherOptionFunc(func(r *refresher) error {
-		r.loader = l
-		return nil
-	})
-}
-
-func WithParser(p Parser) RefresherOption {
-	return refresherOptionFunc(func(r *refresher) error {
-		r.parser = p
-		return nil
-	})
-}
-
-func WithSources(sources ...RefreshSource) RefresherOption {
-	return refresherOptionFunc(func(r *refresher) error {
-		r.sources = append(r.sources, sources...)
-		return nil
-	})
 }
 
 // Refresher handles asynchronously refreshing sets of keys from one or more sources.
@@ -153,7 +117,9 @@ type Refresher interface {
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
-		clock: chronon.SystemClock(),
+		loader: DefaultLoader(),
+		parser: DefaultParser(),
+		clock:  chronon.SystemClock(),
 	}
 
 	for _, o := range options {
@@ -163,19 +129,6 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var validationErr error
 	r.sources, validationErr = validateAndSetDefaults(r.sources...)
 	err = multierr.Append(err, validationErr)
-
-	// delay creating the loader and parser, since it's slightly more
-	// expensive to create them just for defaults
-
-	if r.loader == nil {
-		// when no options are passed, this never returns an error
-		r.loader, _ = NewLoader()
-	}
-
-	if r.parser == nil {
-		// when no options are passed, this never returns an error
-		r.parser, _ = NewParser()
-	}
 
 	return r, err
 }

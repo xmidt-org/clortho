@@ -33,6 +33,8 @@ import (
 	"go.uber.org/multierr"
 )
 
+// UnsupportedLocationError indicates that a URI location couldn't be handled
+// by a Loader.
 type UnsupportedLocationError struct {
 	Location string
 }
@@ -41,6 +43,8 @@ func (ule *UnsupportedLocationError) Error() string {
 	return fmt.Sprintf("Cannot load key(s) from unsupported location: %s", ule.Location)
 }
 
+// NotAFileError indicates that a file URI didn't refer to a system file, but instead
+// referred to a directory, pipe, etc.
 type NotAFileError struct {
 	Location string
 }
@@ -49,6 +53,8 @@ func (nafe *NotAFileError) Error() string {
 	return fmt.Sprintf("Location does not refer to a file: %s", nafe.Location)
 }
 
+// HTTPLoaderError indicates that an error occurred when transacting with a HTTP-based
+// source of key material.
 type HTTPLoaderError struct {
 	Location   string
 	StatusCode int
@@ -74,29 +80,6 @@ type HTTPClient interface {
 // prior to issuing it through a client.
 type HTTPEncoder func(context.Context, *http.Request) error
 
-// LoaderOption represents a configurable option for building a Loader.
-type LoaderOption interface {
-	applyToLoaders(*loaders) error
-}
-
-type loaderOptionFunc func(*loaders) error
-
-func (lof loaderOptionFunc) applyToLoaders(ls *loaders) error { return lof(ls) }
-
-// WithSchemes registers a loader as handling one or more URI schemes.  Use this
-// to add custom schemes or to override one of the schemes a loader handles by default.
-//
-// By default, a Loader handles the file, http, and https schemes.
-func WithSchemes(l Loader, schemes ...string) LoaderOption {
-	return loaderOptionFunc(func(ls *loaders) error {
-		for _, s := range schemes {
-			ls.l[s] = l
-		}
-
-		return nil
-	})
-}
-
 // Loader handles the retrieval of content from an external location.
 type Loader interface {
 	// LoadContent retrieves the key content from location.  Location must be a URL parseable
@@ -106,6 +89,18 @@ type Loader interface {
 	// caching.  This returned metadata can be passed to subsequent calls to make key retrieval more
 	// efficient.
 	LoadContent(ctx context.Context, location string, meta ContentMeta) ([]byte, ContentMeta, error)
+}
+
+var defaultLoader Loader
+
+func init() {
+	defaultLoader, _ = NewLoader()
+}
+
+// DefaultLoader returns the singleton default Loader instance, which is equivalent
+// to what would be returned by calling NewLoader with no options.
+func DefaultLoader() Loader {
+	return defaultLoader
 }
 
 // NewLoader builds a Loader from a set of options.
