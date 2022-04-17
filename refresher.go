@@ -18,6 +18,7 @@
 package clortho
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"math/rand"
@@ -38,40 +39,86 @@ var (
 	ErrRefresherStopped = errors.New("That refresher is not running")
 )
 
+// RefreshEvent represents a set of keys from a given URI that has been
+// asynchronously fetched.
+type RefreshEvent struct {
+	// URI is the source of the keys.
+	URI string
+
+	// Err is the error that occurred while trying to interact with the URI.
+	// This field can be nil to indicate no error.  When this field is non-nil,
+	// the various keys fields will be populated with the last valid set of keys
+	// from the URI.
+	Err error
+
+	// Keys represents the complete set of keys from the URI.
+	Keys []Key
+
+	// New are the keys that a brand new with this event.  These keys will be
+	// included in the Keys field.
+	New []Key
+
+	// Deleted are the keys that are now missing from the refreshed keys.
+	// These keys will not be in the Keys field.  These keys will have been present
+	// in past events.
+	Deleted []Key
+
+	// Anonymous are the keys that have no key id.  This may be empty.  Any keys in
+	// this set will be included in the Keys field.
+	Anonymous []Key
+}
+
+// RefreshListener is a sink for RefreshEvents.
+type RefreshListener interface {
+	// OnRefreshEvent receives a refresh event.  This method must not panic.
+	OnRefreshEvent(RefreshEvent)
+}
+
+// CancelRefreshFunc is returned by Refresher.AddListener so that callers
+// can remove the RefreshListener just added.
+//
+// A CancelRefreshFunc is idempotent:  after the first invocation, calling this
+// closure will have no effect.
+type CancelRefreshFunc func()
+
 // refreshListeners holds a set of listener channels and a cached set of events
 // that have been dispatched, one per source URI.
 type refreshListeners struct {
 	lock      sync.Mutex
-	listeners map[chan<- RefreshEvent]bool
+	listeners *list.List
 	cache     map[string]RefreshEvent
 }
 
-func (rl *refreshListeners) addListener(ch chan<- RefreshEvent) {
+// cancelRefresh creates an idempotent closure that removes the given linked list element.
+func (rl *refreshListeners) cancelRefresh(e *list.Element) CancelRefreshFunc {
+	return func() {
+		rl.lock.Lock()
+		defer rl.lock.Unlock()
+
+		// NOTE: Remove is idempotent: it will not do anything if e is not in the list
+		rl.listeners.Remove(e)
+	}
+}
+
+func (rl *refreshListeners) addListener(l RefreshListener) CancelRefreshFunc {
 	rl.lock.Lock()
 	defer rl.lock.Unlock()
 
 	if rl.listeners == nil {
-		rl.listeners = make(map[chan<- RefreshEvent]bool, 1)
+		rl.listeners = list.New()
 	}
 
-	rl.listeners[ch] = true
+	e := rl.listeners.PushBack(l)
 
 	// dispatch cached events to this new listener
 	for _, e := range rl.cache {
-		ch <- e
+		l.OnRefreshEvent(e)
 	}
+
+	return rl.cancelRefresh(e)
 }
 
-func (rl *refreshListeners) removeListener(ch chan<- RefreshEvent) {
-	rl.lock.Lock()
-	defer rl.lock.Unlock()
-
-	if rl.listeners != nil {
-		delete(rl.listeners, ch)
-	}
-}
-
-func (rl *refreshListeners) dispatch(e RefreshEvent) {
+func (rl *refreshListeners) dispatch(event RefreshEvent) {
 	rl.lock.Lock()
 	defer rl.lock.Unlock()
 
@@ -79,18 +126,10 @@ func (rl *refreshListeners) dispatch(e RefreshEvent) {
 		rl.cache = make(map[string]RefreshEvent, 1)
 	}
 
-	rl.cache[e.URI] = e
-	for ch := range rl.listeners {
-		ch <- e
+	rl.cache[event.URI] = event
+	for e := rl.listeners.Front(); e != nil; e = e.Next() {
+		e.Value.(RefreshListener).OnRefreshEvent(event)
 	}
-}
-
-// RefreshEvent represents a set of keys from a given URI that has been
-// asynchronously fetched.
-type RefreshEvent struct {
-	URI  string
-	Err  error
-	Keys []Key
 }
 
 // Refresher handles asynchronously refreshing sets of keys from one or more sources.
@@ -105,11 +144,11 @@ type Refresher interface {
 	// AddListener registers a channel that receives refresh events.  If this refresher
 	// was already started, the supplied channel immediately receives the most recent events
 	// from each source.
-	AddListener(chan<- RefreshEvent)
-
-	// RemoveListener deregisters a channel.  The supplied channel will no longer receive
-	// events from this Refresher.
-	RemoveListener(chan<- RefreshEvent)
+	//
+	// The returned closure can be used to cancel refreshes sent to the listener.  Clients
+	// are not required to use this closure, particularly if the listener is active for the
+	// life of the application.
+	AddListener(l RefreshListener) CancelRefreshFunc
 }
 
 // NewRefresher constructs a Refresher using the supplied options.  Without any options,
@@ -196,12 +235,8 @@ func (r *refresher) Stop(_ context.Context) error {
 	return nil
 }
 
-func (r *refresher) AddListener(ch chan<- RefreshEvent) {
-	r.listeners.addListener(ch)
-}
-
-func (r *refresher) RemoveListener(ch chan<- RefreshEvent) {
-	r.listeners.removeListener(ch)
+func (r *refresher) AddListener(l RefreshListener) CancelRefreshFunc {
+	return r.listeners.addListener(l)
 }
 
 type refreshTask struct {

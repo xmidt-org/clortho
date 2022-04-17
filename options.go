@@ -17,8 +17,6 @@
 
 package clortho
 
-import "github.com/xmidt-org/chronon"
-
 // LoaderOption represents a configurable option for building a Loader.
 type LoaderOption interface {
 	applyToLoaders(*loaders) error
@@ -108,13 +106,6 @@ type refresherOptionFunc func(*refresher) error
 
 func (rof refresherOptionFunc) applyToRefresher(r *refresher) error {
 	return rof(r)
-}
-
-func WithClock(c chronon.Clock) RefresherOption {
-	return refresherOptionFunc(func(r *refresher) error {
-		r.clock = c
-		return nil
-	})
 }
 
 func WithSources(sources ...RefreshSource) RefresherOption {
