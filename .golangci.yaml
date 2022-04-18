@@ -29,3 +29,7 @@ linters-settings:
   errorlint:
     # Report non-wrapping error creation using fmt.Errorf
     errorf: false
+  gosec:
+    excludes:
+      # don't check math/rand vs crypto/rand
+      - G404
