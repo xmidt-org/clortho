@@ -17,6 +17,8 @@
 
 package clortho
 
+import "crypto"
+
 // LoaderOption represents a configurable option for building a Loader.
 type LoaderOption interface {
 	applyToLoaders(*loaders) error
@@ -106,6 +108,13 @@ type refresherOptionFunc func(*refresher) error
 
 func (rof refresherOptionFunc) applyToRefresher(r *refresher) error {
 	return rof(r)
+}
+
+func WithThumbprintHash(h crypto.Hash) RefresherOption {
+	return refresherOptionFunc(func(r *refresher) error {
+		r.thumbprintHash = h
+		return nil
+	})
 }
 
 func WithSources(sources ...RefreshSource) RefresherOption {

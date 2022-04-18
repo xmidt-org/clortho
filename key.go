@@ -26,8 +26,20 @@ import (
 	"go.uber.org/multierr"
 )
 
+// Thumbprinter is implemented by anything that can produce a secure thumbprint of itself.
+type Thumbprinter interface {
+	// Thumbprint produces the RFC 7638 thumbprint hash, using the supplied algorithm.  The
+	// typical value to pass to this method is crypto.SHA256.
+	//
+	// The returned byte slice contains the raw bytes of the hash.  To convert it to a string
+	// conforming to RFC 7638, use base64.RawURLEncoding.EncodeToString.
+	Thumbprint(crypto.Hash) ([]byte, error)
+}
+
 // Key is the minimal interface for cryptographic keys.  Once created, a Key is immutable.
 type Key interface {
+	Thumbprinter
+
 	// KeyID is the identifier for this Key.  This method corresponds to the kid field of a JWK.
 	// Note that a KeyID is entirely optional.  This method can return the empty string.
 	KeyID() string
@@ -54,6 +66,7 @@ type Key interface {
 }
 
 type key struct {
+	Thumbprinter
 	keyID    string
 	keyType  string
 	keyUsage string
@@ -69,9 +82,10 @@ func (k *key) Public() crypto.PublicKey { return k.public }
 
 func convertJWKKey(jk jwk.Key) (Key, error) {
 	k := &key{
-		keyID:    jk.KeyID(),
-		keyType:  string(jk.KeyType()),
-		keyUsage: jk.KeyUsage(),
+		Thumbprinter: jk,
+		keyID:        jk.KeyID(),
+		keyType:      string(jk.KeyType()),
+		keyUsage:     jk.KeyUsage(),
 	}
 
 	if err := jk.Raw(&k.raw); err != nil {

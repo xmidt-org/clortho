@@ -24,6 +24,9 @@ type KeyAccessor interface {
 	// Get returns the Key associated with the given key identifier (kid).
 	// If there is no such key, the second return is false.
 	Get(keyID string) (Key, bool)
+
+	// Len returns the number of keys currently in this ring.
+	Len() int
 }
 
 // KeyRing is a clientside cache of keys.  Implementations are always
@@ -35,9 +38,12 @@ type KeyRing interface {
 
 // NewKeyRing constructs an empty KeyRing.
 func NewKeyRing() KeyRing {
-	return &keyRing{}
+	return &keyRing{
+		keys: map[string]Key{},
+	}
 }
 
+// keyRing is the internal KeyRing implementation.
 type keyRing struct {
 	lock sync.RWMutex
 	keys map[string]Key
@@ -50,6 +56,33 @@ func (kr *keyRing) Get(keyID string) (k Key, ok bool) {
 	return
 }
 
+func (kr *keyRing) Len() (n int) {
+	kr.lock.RLock()
+	n = len(kr.keys)
+	kr.lock.RUnlock()
+	return
+}
+
 func (kr *keyRing) OnRefreshEvent(event RefreshEvent) {
-	// TODO
+	// check if this event represents an actual change to the set of keys
+	if event.Err != nil || (len(event.New) == 0 && len(event.Deleted) == 0) {
+		return
+	}
+
+	kr.lock.Lock()
+	defer kr.lock.Unlock()
+
+	// reinsert all keys, not just new ones, so that we pick up any changed
+	// private key attributes
+	for _, key := range event.Keys {
+		keyID := key.KeyID()
+		if len(keyID) > 0 {
+			kr.keys[keyID] = key
+		}
+	}
+
+	for _, key := range event.Deleted {
+		keyID := key.KeyID()
+		delete(kr.keys, keyID)
+	}
 }

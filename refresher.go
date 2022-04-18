@@ -20,6 +20,8 @@ package clortho
 import (
 	"container/list"
 	"context"
+	"crypto"
+	"encoding/base64"
 	"errors"
 	"math/rand"
 	"sync"
@@ -51,7 +53,8 @@ type RefreshEvent struct {
 	// from the URI.
 	Err error
 
-	// Keys represents the complete set of keys from the URI.
+	// Keys represents the complete set of keys from the URI.  When Err is not nil,
+	// this field will be set to the last known valid set of keys.
 	Keys []Key
 
 	// New are the keys that a brand new with this event.  These keys will be
@@ -60,12 +63,8 @@ type RefreshEvent struct {
 
 	// Deleted are the keys that are now missing from the refreshed keys.
 	// These keys will not be in the Keys field.  These keys will have been present
-	// in past events.
+	// in the previous event(s).
 	Deleted []Key
-
-	// Anonymous are the keys that have no key id.  This may be empty.  Any keys in
-	// this set will be included in the Keys field.
-	Anonymous []Key
 }
 
 // RefreshListener is a sink for RefreshEvents.
@@ -156,8 +155,9 @@ type Refresher interface {
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
-		fetcher: DefaultFetcher(),
-		clock:   chronon.SystemClock(),
+		fetcher:        DefaultFetcher(),
+		thumbprintHash: crypto.SHA256,
+		clock:          chronon.SystemClock(),
 	}
 
 	for _, o := range options {
@@ -173,10 +173,12 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 
 // refresher is the internal Refresher implementation.
 type refresher struct {
-	fetcher   Fetcher
-	sources   []RefreshSource
-	listeners refreshListeners
-	clock     chronon.Clock
+	fetcher        Fetcher
+	sources        []RefreshSource
+	listeners      refreshListeners
+	thumbprintHash crypto.Hash
+
+	clock chronon.Clock
 
 	taskLock   sync.Mutex
 	taskCancel context.CancelFunc
@@ -200,10 +202,10 @@ func (r *refresher) Start(_ context.Context) error {
 			jitterHi = int64((1.0 + s.Jitter) * float64(s.Interval))
 
 			task = &refreshTask{
-				source:   s,
-				fetcher:  r.fetcher,
-				dispatch: r.listeners.dispatch,
-				clock:    r.clock,
+				source:    s,
+				fetcher:   r.fetcher,
+				listeners: &r.listeners,
+				clock:     r.clock,
 
 				intervalBase:  jitterLo,
 				intervalRange: jitterHi - jitterLo + 1,
@@ -240,10 +242,11 @@ func (r *refresher) AddListener(l RefreshListener) CancelRefreshFunc {
 }
 
 type refreshTask struct {
-	source   RefreshSource
-	fetcher  Fetcher
-	dispatch func(RefreshEvent)
-	clock    chronon.Clock
+	source         RefreshSource
+	fetcher        Fetcher
+	listeners      *refreshListeners
+	thumbprintHash crypto.Hash
+	clock          chronon.Clock
 
 	// precomputed jitter range
 	intervalBase  int64
@@ -270,14 +273,59 @@ func (rt *refreshTask) computeNextRefresh(meta ContentMeta, err error) (next tim
 	return
 }
 
+func (rt *refreshTask) newKeyMap(keys []Key) (m map[string]Key, err error) {
+	m = make(map[string]Key, len(keys))
+	for _, k := range keys {
+		keyID := k.KeyID()
+		if len(keyID) == 0 {
+			if h, hErr := k.Thumbprint(rt.thumbprintHash); hErr == nil {
+				keyID = base64.RawURLEncoding.EncodeToString(h)
+			} else {
+				// NOTE: something wrong with this key, so report the error but
+				// drop the key on the floor.
+				err = multierr.Append(err, hErr)
+				continue
+			}
+		}
+
+		m[keyID] = k
+	}
+
+	return
+}
+
+func (rt *refreshTask) findChanges(next, prev map[string]Key) (newKeys, deletedKeys []Key) {
+	for nkid, nkey := range next {
+		if _, ok := prev[nkid]; !ok {
+			// a key in the next map but not in the previous map is a new key
+			newKeys = append(newKeys, nkey)
+		}
+	}
+
+	for pkid, pkey := range prev {
+		if _, ok := next[pkid]; !ok {
+			// a key in the previous map but not in the next map is a deleted key
+			deletedKeys = append(deletedKeys, pkey)
+		}
+	}
+
+	return
+}
+
 func (rt *refreshTask) run(ctx context.Context) {
 	var (
-		keys []Key
-		meta ContentMeta
+		prevKeys   []Key
+		prevKeyMap map[string]Key
+		prevMeta   ContentMeta
 	)
 
 	for {
-		nextKeys, nextMeta, err := rt.fetcher.Fetch(ctx, rt.source.URI, meta)
+		nextKeys, nextMeta, err := rt.fetcher.Fetch(ctx, rt.source.URI, prevMeta)
+		event := RefreshEvent{
+			URI: rt.source.URI,
+			Err: err,
+		}
+
 		switch {
 		case ctx.Err() != nil:
 			// we were asked to shutdown, and this interrupted the fetch
@@ -286,22 +334,32 @@ func (rt *refreshTask) run(ctx context.Context) {
 			return
 
 		case err == nil:
-			keys = nextKeys
-			meta = nextMeta
+			nextKeyMap, nextErr := rt.newKeyMap(nextKeys)
+			if nextErr == nil {
+				// TODO
+			}
+
+			event.Keys = make([]Key, len(nextKeys))
+			copy(event.Keys, nextKeys)
+			event.New, event.Deleted = rt.findChanges(nextKeyMap, prevKeyMap)
+
+			prevKeys = nextKeys
+			prevKeyMap = nextKeyMap
+			prevMeta = nextMeta
 
 		case err != nil:
 			// reset the content metadata
-			meta = ContentMeta{}
+			prevMeta = ContentMeta{}
+
+			// send out the previous keys, and leave New/Deleted unset
+			event.Keys = make([]Key, len(prevKeys))
+			copy(event.Keys, prevKeys)
 		}
 
-		rt.dispatch(RefreshEvent{
-			URI:  rt.source.URI,
-			Keys: keys,
-			Err:  err,
-		})
+		rt.listeners.dispatch(event)
 
 		var (
-			next  = rt.computeNextRefresh(meta, err)
+			next  = rt.computeNextRefresh(prevMeta, err)
 			timer = rt.clock.NewTimer(next)
 		)
 
