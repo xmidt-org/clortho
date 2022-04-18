@@ -334,10 +334,8 @@ func (rt *refreshTask) run(ctx context.Context) {
 			return
 
 		case err == nil:
-			nextKeyMap, nextErr := rt.newKeyMap(nextKeys)
-			if nextErr == nil {
-				// TODO
-			}
+			// TODO: handle the error somehow
+			nextKeyMap, _ := rt.newKeyMap(nextKeys)
 
 			event.Keys = make([]Key, len(nextKeys))
 			copy(event.Keys, nextKeys)
