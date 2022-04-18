@@ -99,6 +99,28 @@ func (rof resolverOptionFunc) applyToResolver(r *resolver) error {
 	return rof(r)
 }
 
+// WithKeyIDExpander establishes the Expander strategy used for resolving
+// individual keys.
+func WithKeyIDExpander(e Expander) ResolverOption {
+	return resolverOptionFunc(func(r *resolver) error {
+		r.keyIDExpander = e
+		return nil
+	})
+}
+
+// WithKeyIDTemplate establishes the URI template used for resolving
+// individual keys.
+func WithKeyIDTemplate(t string) ResolverOption {
+	return resolverOptionFunc(func(r *resolver) error {
+		e, err := NewExpander(t)
+		if err == nil {
+			r.keyIDExpander = e
+		}
+
+		return err
+	})
+}
+
 // RefresherOption is a configurable option passed to NewRefresher.
 type RefresherOption interface {
 	applyToRefresher(*refresher) error
