@@ -1,6 +1,6 @@
 # clortho
 
-clortho does something good.
+clortho provides clientside management for cryptographic keys.
 
 [![Build Status](https://github.com/xmidt-org/clortho/workflows/CI/badge.svg)](https://github.com/xmidt-org/clortho/actions)
 [![codecov.io](http://codecov.io/github/xmidt-org/clortho/coverage.svg?branch=main)](http://codecov.io/github/xmidt-org/clortho?branch=main)
@@ -32,7 +32,7 @@ clortho does something good.
 
 ## Summary
 
-Summary should be a small paragraph explanation of what this project does.
+clortho manages cryptographic keys, either locally supplied or remotely hosted.
 
 ## Table of Contents
 
@@ -48,11 +48,9 @@ By participating, you agree to this Code.
 
 ## Details
 
-Add details here.
-
 ## Install
 
-Add details here.
+go get -u github.com/xmidt-org/clortho
 
 ## Contributing
 
