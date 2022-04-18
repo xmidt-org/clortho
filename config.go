@@ -133,7 +133,7 @@ func (rs RefreshSource) validateAndSetDefaults() (defaulted RefreshSource, err e
 // and had any necessary defaults applied.  A composite error containing all validation errors
 // is returned, or nil to indicate everything was valid.
 func validateAndSetDefaults(in ...RefreshSource) (out []RefreshSource, err error) {
-	in = make([]RefreshSource, 0, len(out))
+	out = make([]RefreshSource, 0, len(out))
 	duplicates := make(map[string]RefreshSource, len(out))
 	for _, s := range in {
 		defaulted, validationErr := s.validateAndSetDefaults()
