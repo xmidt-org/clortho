@@ -17,7 +17,7 @@
 
 package clortho
 
-import "github.com/xmidt-org/chronon"
+import "crypto"
 
 // LoaderOption represents a configurable option for building a Loader.
 type LoaderOption interface {
@@ -99,6 +99,28 @@ func (rof resolverOptionFunc) applyToResolver(r *resolver) error {
 	return rof(r)
 }
 
+// WithKeyIDExpander establishes the Expander strategy used for resolving
+// individual keys.
+func WithKeyIDExpander(e Expander) ResolverOption {
+	return resolverOptionFunc(func(r *resolver) error {
+		r.keyIDExpander = e
+		return nil
+	})
+}
+
+// WithKeyIDTemplate establishes the URI template used for resolving
+// individual keys.
+func WithKeyIDTemplate(t string) ResolverOption {
+	return resolverOptionFunc(func(r *resolver) error {
+		e, err := NewExpander(t)
+		if err == nil {
+			r.keyIDExpander = e
+		}
+
+		return err
+	})
+}
+
 // RefresherOption is a configurable option passed to NewRefresher.
 type RefresherOption interface {
 	applyToRefresher(*refresher) error
@@ -110,9 +132,9 @@ func (rof refresherOptionFunc) applyToRefresher(r *refresher) error {
 	return rof(r)
 }
 
-func WithClock(c chronon.Clock) RefresherOption {
+func WithThumbprintHash(h crypto.Hash) RefresherOption {
 	return refresherOptionFunc(func(r *refresher) error {
-		r.clock = c
+		r.thumbprintHash = h
 		return nil
 	})
 }
