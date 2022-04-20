@@ -33,6 +33,9 @@ const (
 var (
 	// ErrNoTemplate indicates that no URI template is available for that Resolver's method.
 	ErrNoTemplate = errors.New("No URI template expander has been configured for that method.")
+
+	// ErrKeyNotFound indicates that a key could not be resolved, e.g. a key ID did not exist.
+	ErrKeyNotFound = errors.New("No such key exists")
 )
 
 // ResolveEvent holds information about a key ID that has been resolved.
@@ -131,10 +134,25 @@ func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err e
 	}
 
 	if err == nil {
-		if len(keys) == 1 {
+		switch len(keys) {
+		case 0:
+			err = ErrKeyNotFound
+
+		case 1:
 			k = keys[0]
-		} else {
-			err = errors.New("TODO")
+
+		default:
+			// scan a key set looking for the key in question
+			for _, candidate := range keys {
+				if candidate.KeyID() == keyID {
+					k = candidate
+					break
+				}
+			}
+
+			if k == nil {
+				err = ErrKeyNotFound
+			}
 		}
 	}
 
