@@ -39,14 +39,16 @@ type parsers struct {
 	p map[string]Parser
 }
 
-func (ps *parsers) Parse(format string, content []byte) ([]Key, error) {
+func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) {
 	if p, ok := ps.p[format]; ok {
-		return p.Parse(format, content)
+		keys, err = p.Parse(format, content)
+	} else {
+		err = &UnsupportedFormatError{
+			Format: format,
+		}
 	}
 
-	return nil, &UnsupportedFormatError{
-		Format: format,
-	}
+	return
 }
 
 var defaultParser Parser
@@ -76,6 +78,10 @@ func DefaultParser() Parser {
 //
 // A caller can use WithFormats to change the parser associated with a format or
 // to register a Parser for a new, custom format.
+//
+// The Parser returned by this function guarantees that all keys have a key ID.  A thumbprint
+// using the WithKeyIDHash option is used to generate key IDs as needed.  By default, SHA256
+// is used if WithKeyIDHash option is supplied.
 func NewParser(options ...ParserOption) (Parser, error) {
 	var (
 		err error

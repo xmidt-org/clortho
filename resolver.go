@@ -35,6 +35,29 @@ var (
 	ErrNoTemplate = errors.New("No URI template expander has been configured for that method.")
 )
 
+// ResolveEvent holds information about a key ID that has been resolved.
+type ResolveEvent struct {
+	// URI is the actual, expanded URI used to obtain the key material.
+	URI string
+
+	// KeyID is the key ID that was resolved.
+	KeyID string
+
+	// Key is the key material that was returned from the URI.
+	Key Key
+
+	// Err holds any error that occurred while trying to fetch key material.
+	// If this field is set, Key will be nil.
+	Err error
+}
+
+// ResolveListener is a sink for ResolveEvents.
+type ResolveListener interface {
+	// OnResolveEvent receives notifications for attempts to resolve keys.  This
+	// method must not panic.
+	OnResolveEvent(ResolveEvent)
+}
+
 // Expander is the strategy for expanding a URI template.
 type Expander interface {
 	// Expand takes a value map and returns the URI resulting from that expansion.
@@ -50,12 +73,16 @@ func NewExpander(rawTemplate string) (Expander, error) {
 type Resolver interface {
 	// ResolveKeyID attempts to locate a key with a given keyID (kid).
 	ResolveKeyID(ctx context.Context, keyID string) (Key, error)
+
+	// AddListener attaches a sink for ResolveEvents.  Only events that
+	// occur after this method call will be dispatched to the given listener.
+	AddListener(ResolveListener) CancelListenerFunc
 }
 
 // NewResolver constructs a Resolver from a set of options.  By default, a Resolver
 // uses the DefaultLoader() and DefaultParser().
 //
-// If no URI template is supplied, ResolveKeyID will return an error.
+// If no URI template is supplied, this function returns ErrNoTemplate.
 func NewResolver(options ...ResolverOption) (Resolver, error) {
 	var (
 		err error
@@ -69,21 +96,28 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 		err = multierr.Append(err, o.applyToResolver(r))
 	}
 
+	if r.keyIDExpander == nil {
+		err = multierr.Append(err, ErrNoTemplate)
+	}
+
 	return r, err
 }
 
 // resolver is the internal Resolver implementation.
 type resolver struct {
-	fetcher Fetcher
+	fetcher   Fetcher
+	listeners listeners
 
 	keyIDExpander Expander
 }
 
-func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
-	if r.keyIDExpander == nil {
-		err = ErrNoTemplate
-	}
+func (r *resolver) dispatch(event ResolveEvent) {
+	r.listeners.visit(func(l interface{}) {
+		l.(ResolveListener).OnResolveEvent(event)
+	})
+}
 
+func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
 	var location string
 	if err == nil {
 		location, err = r.keyIDExpander.Expand(map[string]interface{}{
@@ -104,5 +138,16 @@ func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err e
 		}
 	}
 
+	r.dispatch(ResolveEvent{
+		URI:   location,
+		Key:   k,
+		KeyID: keyID,
+		Err:   err,
+	})
+
 	return
+}
+
+func (r *resolver) AddListener(l ResolveListener) CancelListenerFunc {
+	return r.listeners.addListener(l)
 }

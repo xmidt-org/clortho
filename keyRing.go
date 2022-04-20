@@ -31,16 +31,29 @@ type KeyAccessor interface {
 
 // KeyRing is a clientside cache of keys.  Implementations are always
 // safe for concurrent access.
+//
+// A KeyRing can consume events from a Refresher and Resolver, which will
+// update the ring's set of keys.
 type KeyRing interface {
 	KeyAccessor
 	RefreshListener
+	ResolveListener
 }
 
 // NewKeyRing constructs an empty KeyRing.
-func NewKeyRing() KeyRing {
-	return &keyRing{
-		keys: map[string]Key{},
+func NewKeyRing(initialKeys ...Key) KeyRing {
+	kr := &keyRing{
+		keys: make(map[string]Key, len(initialKeys)),
 	}
+
+	for _, k := range initialKeys {
+		keyID := k.KeyID()
+		if len(keyID) > 0 {
+			kr.keys[keyID] = k
+		}
+	}
+
+	return kr
 }
 
 // keyRing is the internal KeyRing implementation.
@@ -85,4 +98,14 @@ func (kr *keyRing) OnRefreshEvent(event RefreshEvent) {
 		keyID := key.KeyID()
 		delete(kr.keys, keyID)
 	}
+}
+
+func (kr *keyRing) OnResolveEvent(event ResolveEvent) {
+	if event.Key == nil {
+		return
+	}
+
+	kr.lock.Lock()
+	kr.keys[event.KeyID] = event.Key
+	kr.lock.Unlock()
 }

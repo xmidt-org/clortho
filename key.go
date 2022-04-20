@@ -21,6 +21,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"encoding/base64"
 
 	"github.com/lestrrat-go/jwx/jwk"
 	"go.uber.org/multierr"
@@ -141,4 +142,29 @@ func appendJWKSet(js jwk.Set, keys []Key) ([]Key, error) {
 	}
 
 	return keys, err
+}
+
+// EnsureKeyID conditionally assigns a key ID to a given key.  The updated
+// Key is returned, along with any error from the hash.
+//
+// If k already has a key ID, it is returned as is with no error.
+//
+// If k does not have a key ID, a thumbprint is generated using the supplied
+// hash.  The returned key will be a copy of k with the newly generated key ID.
+// If an error occurred, then k is returned as is.
+func EnsureKeyID(k Key, h crypto.Hash) (updated Key, err error) {
+	updated = k
+	if len(k.KeyID()) == 0 {
+		var t []byte
+		t, err = k.Thumbprint(h)
+
+		if err == nil {
+			clone := new(key)
+			*clone = *(k.(*key))
+			clone.keyID = base64.RawURLEncoding.EncodeToString(t)
+			updated = clone
+		}
+	}
+
+	return
 }
