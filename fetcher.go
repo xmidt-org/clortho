@@ -19,6 +19,8 @@ package clortho
 
 import (
 	"context"
+	"crypto"
+	_ "crypto/sha256"
 
 	"go.uber.org/multierr"
 )
@@ -28,6 +30,9 @@ import (
 type Fetcher interface {
 	// Fetch grabs keys from a URI.  The prev ContentMeta may either be an empty struct, e.g. ContentMeta{},
 	// or the ContentMeta from a previous call to Fetch.
+	//
+	// This method ensures that each key has a key ID.  For keys that do not have a key ID from their source,
+	// a key ID is generated using a thumbprint hash.
 	Fetch(ctx context.Context, location string, prev ContentMeta) (keys []Key, next ContentMeta, err error)
 }
 
@@ -49,8 +54,9 @@ func NewFetcher(options ...FetcherOption) (Fetcher, error) {
 		err error
 
 		f = &fetcher{
-			loader: DefaultLoader(),
-			parser: DefaultParser(),
+			loader:    DefaultLoader(),
+			parser:    DefaultParser(),
+			keyIDHash: crypto.SHA256,
 		}
 	)
 
@@ -63,8 +69,9 @@ func NewFetcher(options ...FetcherOption) (Fetcher, error) {
 
 // fetcher is the internal Fetcher implementation.
 type fetcher struct {
-	loader Loader
-	parser Parser
+	loader    Loader
+	parser    Parser
+	keyIDHash crypto.Hash
 }
 
 func (f *fetcher) Fetch(ctx context.Context, location string, prev ContentMeta) (keys []Key, next ContentMeta, err error) {
@@ -73,6 +80,12 @@ func (f *fetcher) Fetch(ctx context.Context, location string, prev ContentMeta) 
 
 	if err == nil {
 		keys, err = f.parser.Parse(next.Format, data)
+	}
+
+	for i, k := range keys {
+		updated, hashErr := EnsureKeyID(k, f.keyIDHash)
+		keys[i] = updated
+		err = multierr.Append(err, hashErr)
 	}
 
 	return

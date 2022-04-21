@@ -88,6 +88,15 @@ func WithParser(p Parser) FetcherOption {
 	})
 }
 
+// WithKeyIDHash sets the cryptographic hash used to generate key IDs for keys
+// which do not have them.  By default, crypto.SHA256 is used.
+func WithKeyIDHash(h crypto.Hash) FetcherOption {
+	return fetcherOptionFunc(func(f *fetcher) error {
+		f.keyIDHash = h
+		return nil
+	})
+}
+
 // ResolverOption represents a configurable option passed to NewResolver.
 type ResolverOption interface {
 	applyToResolver(*resolver) error
@@ -121,6 +130,15 @@ func WithKeyIDTemplate(t string) ResolverOption {
 	})
 }
 
+// WithKeyRing sets a KeyRing to act as a cache for the Resolver.
+// By default, a Resolver is not associated with any KeyRing.
+func WithKeyRing(kr KeyRing) ResolverOption {
+	return resolverOptionFunc(func(r *resolver) error {
+		r.keyRing = kr
+		return nil
+	})
+}
+
 // RefresherOption is a configurable option passed to NewRefresher.
 type RefresherOption interface {
 	applyToRefresher(*refresher) error
@@ -130,13 +148,6 @@ type refresherOptionFunc func(*refresher) error
 
 func (rof refresherOptionFunc) applyToRefresher(r *refresher) error {
 	return rof(r)
-}
-
-func WithThumbprintHash(h crypto.Hash) RefresherOption {
-	return refresherOptionFunc(func(r *refresher) error {
-		r.thumbprintHash = h
-		return nil
-	})
 }
 
 func WithSources(sources ...RefreshSource) RefresherOption {

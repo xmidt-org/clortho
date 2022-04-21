@@ -18,16 +18,11 @@
 package clortho
 
 import (
-	"container/list"
 	"context"
-	"crypto"
-	"encoding/base64"
 	"errors"
 	"math/rand"
 	"sync"
 	"time"
-
-	_ "crypto/sha256"
 
 	"github.com/xmidt-org/chronon"
 	"go.uber.org/multierr"
@@ -73,81 +68,27 @@ type RefreshListener interface {
 	OnRefreshEvent(RefreshEvent)
 }
 
-// CancelRefreshFunc is returned by Refresher.AddListener so that callers
-// can remove the RefreshListener just added.
-//
-// A CancelRefreshFunc is idempotent:  after the first invocation, calling this
-// closure will have no effect.
-type CancelRefreshFunc func()
-
-// refreshListeners holds a set of listener channels and a cached set of events
-// that have been dispatched, one per source URI.
-type refreshListeners struct {
-	lock      sync.Mutex
-	listeners *list.List
-	cache     map[string]RefreshEvent
-}
-
-// cancelRefresh creates an idempotent closure that removes the given linked list element.
-func (rl *refreshListeners) cancelRefresh(e *list.Element) CancelRefreshFunc {
-	return func() {
-		rl.lock.Lock()
-		defer rl.lock.Unlock()
-
-		// NOTE: Remove is idempotent: it will not do anything if e is not in the list
-		rl.listeners.Remove(e)
-	}
-}
-
-func (rl *refreshListeners) addListener(l RefreshListener) CancelRefreshFunc {
-	rl.lock.Lock()
-	defer rl.lock.Unlock()
-
-	if rl.listeners == nil {
-		rl.listeners = list.New()
-	}
-
-	e := rl.listeners.PushBack(l)
-
-	// dispatch cached events to this new listener
-	for _, e := range rl.cache {
-		l.OnRefreshEvent(e)
-	}
-
-	return rl.cancelRefresh(e)
-}
-
-func (rl *refreshListeners) dispatch(event RefreshEvent) {
-	rl.lock.Lock()
-	defer rl.lock.Unlock()
-
-	if rl.cache == nil {
-		rl.cache = make(map[string]RefreshEvent, 1)
-	}
-
-	rl.cache[event.URI] = event
-	for e := rl.listeners.Front(); e != nil; e = e.Next() {
-		e.Value.(RefreshListener).OnRefreshEvent(event)
-	}
-}
-
 // Refresher handles asynchronously refreshing sets of keys from one or more sources.
 type Refresher interface {
 	// Start bootstraps tasks that fetch keys and dispatch events to any listeners.
-	// Keys will arrive asynchronously to any registered listener channels.
+	// Keys will arrive asynchronously to any registered listeners.
+	//
+	// If this Refresher has already been started, this method returns ErrRefresherStarted.
 	Start(context.Context) error
 
 	// Stop shuts down all refresh tasks.
+	//
+	// If this Refresher is not running, this method returns ErrRefresherStopped.
 	Stop(context.Context) error
 
-	// AddListener registers a channel that receives refresh events.  If this refresher
-	// was already started, the supplied channel immediately receives the most recent events
-	// from each source.
+	// AddListener registers a channel that receives refresh events.  No caching of events
+	// is done.  The supplied listener will receive events the next time any of the key
+	// sources are queried.
 	//
 	// The returned closure can be used to cancel refreshes sent to the listener.  Clients
 	// are not required to use this closure, particularly if the listener is active for the
 	// life of the application.
-	AddListener(l RefreshListener) CancelRefreshFunc
+	AddListener(l RefreshListener) CancelListenerFunc
 }
 
 // NewRefresher constructs a Refresher using the supplied options.  Without any options,
@@ -155,9 +96,8 @@ type Refresher interface {
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
-		fetcher:        DefaultFetcher(),
-		thumbprintHash: crypto.SHA256,
-		clock:          chronon.SystemClock(),
+		fetcher: DefaultFetcher(),
+		clock:   chronon.SystemClock(),
 	}
 
 	for _, o := range options {
@@ -173,10 +113,9 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 
 // refresher is the internal Refresher implementation.
 type refresher struct {
-	fetcher        Fetcher
-	sources        []RefreshSource
-	listeners      refreshListeners
-	thumbprintHash crypto.Hash
+	fetcher   Fetcher
+	sources   []RefreshSource
+	listeners listeners
 
 	clock chronon.Clock
 
@@ -202,10 +141,10 @@ func (r *refresher) Start(_ context.Context) error {
 			jitterHi = int64((1.0 + s.Jitter) * float64(s.Interval))
 
 			task = &refreshTask{
-				source:    s,
-				fetcher:   r.fetcher,
-				listeners: &r.listeners,
-				clock:     r.clock,
+				source:   s,
+				fetcher:  r.fetcher,
+				dispatch: r.dispatch,
+				clock:    r.clock,
 
 				intervalBase:  jitterLo,
 				intervalRange: jitterHi - jitterLo + 1,
@@ -237,16 +176,21 @@ func (r *refresher) Stop(_ context.Context) error {
 	return nil
 }
 
-func (r *refresher) AddListener(l RefreshListener) CancelRefreshFunc {
+func (r *refresher) AddListener(l RefreshListener) CancelListenerFunc {
 	return r.listeners.addListener(l)
 }
 
+func (r *refresher) dispatch(event RefreshEvent) {
+	r.listeners.visit(func(l interface{}) {
+		l.(RefreshListener).OnRefreshEvent(event)
+	})
+}
+
 type refreshTask struct {
-	source         RefreshSource
-	fetcher        Fetcher
-	listeners      *refreshListeners
-	thumbprintHash crypto.Hash
-	clock          chronon.Clock
+	source   RefreshSource
+	fetcher  Fetcher
+	dispatch func(RefreshEvent)
+	clock    chronon.Clock
 
 	// precomputed jitter range
 	intervalBase  int64
@@ -276,19 +220,7 @@ func (rt *refreshTask) computeNextRefresh(meta ContentMeta, err error) (next tim
 func (rt *refreshTask) newKeyMap(keys []Key) (m map[string]Key, err error) {
 	m = make(map[string]Key, len(keys))
 	for _, k := range keys {
-		keyID := k.KeyID()
-		if len(keyID) == 0 {
-			if h, hErr := k.Thumbprint(rt.thumbprintHash); hErr == nil {
-				keyID = base64.RawURLEncoding.EncodeToString(h)
-			} else {
-				// NOTE: something wrong with this key, so report the error but
-				// drop the key on the floor.
-				err = multierr.Append(err, hErr)
-				continue
-			}
-		}
-
-		m[keyID] = k
+		m[k.KeyID()] = k
 	}
 
 	return
@@ -354,7 +286,7 @@ func (rt *refreshTask) run(ctx context.Context) {
 			copy(event.Keys, prevKeys)
 		}
 
-		rt.listeners.dispatch(event)
+		rt.dispatch(event)
 
 		var (
 			next  = rt.computeNextRefresh(prevMeta, err)

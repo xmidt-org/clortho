@@ -31,16 +31,36 @@ type KeyAccessor interface {
 
 // KeyRing is a clientside cache of keys.  Implementations are always
 // safe for concurrent access.
+//
+// A KeyRing can consume events from a Refresher and Resolver, which will
+// update the ring's set of keys.
 type KeyRing interface {
 	KeyAccessor
 	RefreshListener
+	ResolveListener
+
+	// Add allows ad hoc keys to be added to this ring.  Any key that has
+	// no key ID will be skipped.
+	//
+	// This method returns the actual count of keys added.  This will include
+	// keys already in the ring, since those will be overwritten with the new Key object.
+	Add(...Key) int
 }
 
-// NewKeyRing constructs an empty KeyRing.
-func NewKeyRing() KeyRing {
-	return &keyRing{
-		keys: map[string]Key{},
+// NewKeyRing constructs a KeyRing with an optional set of initial keys.  Any key
+// that has no key ID is skipped.
+func NewKeyRing(initialKeys ...Key) KeyRing {
+	kr := &keyRing{
+		keys: make(map[string]Key, len(initialKeys)),
 	}
+
+	for _, k := range initialKeys {
+		if keyID := k.KeyID(); len(keyID) > 0 {
+			kr.keys[keyID] = k
+		}
+	}
+
+	return kr
 }
 
 // keyRing is the internal KeyRing implementation.
@@ -85,4 +105,28 @@ func (kr *keyRing) OnRefreshEvent(event RefreshEvent) {
 		keyID := key.KeyID()
 		delete(kr.keys, keyID)
 	}
+}
+
+func (kr *keyRing) OnResolveEvent(event ResolveEvent) {
+	if event.Key == nil {
+		return
+	}
+
+	kr.lock.Lock()
+	kr.keys[event.KeyID] = event.Key
+	kr.lock.Unlock()
+}
+
+func (kr *keyRing) Add(keys ...Key) (n int) {
+	kr.lock.Lock()
+	defer kr.lock.Unlock()
+
+	for _, newKey := range keys {
+		if keyID := newKey.KeyID(); len(keyID) > 0 {
+			n++
+			kr.keys[keyID] = newKey
+		}
+	}
+
+	return
 }
