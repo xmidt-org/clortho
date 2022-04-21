@@ -20,6 +20,8 @@ package clortho
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 
 	"github.com/jtacoma/uritemplates"
 	"go.uber.org/multierr"
@@ -92,6 +94,7 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 
 		r = &resolver{
 			fetcher: DefaultFetcher(),
+			pending: pendingResolverRequests{},
 		}
 	)
 
@@ -106,10 +109,37 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 	return r, err
 }
 
+// pendingResolverRequest represents a resolve operation that is inflight.  Concurrent
+// code may use this to block on the results of a resolve operation happening in another
+// goroutine.
+type pendingResolverRequest struct {
+	done  chan struct{}
+	value atomic.Value
+}
+
+type pendingResolverRequests map[string]*pendingResolverRequest
+
+func (prr pendingResolverRequests) requestFor(keyID string) (r *pendingResolverRequest, wait bool) {
+	r, wait = prr[keyID]
+	if !wait {
+		r = &pendingResolverRequest{
+			done: make(chan struct{}),
+		}
+
+		prr[keyID] = r
+	}
+
+	return
+}
+
 // resolver is the internal Resolver implementation.
 type resolver struct {
 	fetcher   Fetcher
 	listeners listeners
+
+	resolveLock sync.Mutex
+	pending     pendingResolverRequests
+	keyRing     KeyRing
 
 	keyIDExpander Expander
 }
@@ -120,7 +150,47 @@ func (r *resolver) dispatch(event ResolveEvent) {
 	})
 }
 
+func (r *resolver) checkKeyRing(keyID string) (k Key, ok bool) {
+	if r.keyRing != nil {
+		k, ok = r.keyRing.Get(keyID)
+	}
+
+	return
+}
+
 func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
+	var ok bool
+	if k, ok = r.checkKeyRing(keyID); ok {
+		return
+	}
+
+	r.resolveLock.Lock()
+	if k, ok = r.checkKeyRing(keyID); ok {
+		r.resolveLock.Unlock()
+		return
+	}
+
+	request, wait := r.pending.requestFor(keyID)
+	r.resolveLock.Unlock()
+
+	if wait {
+		// another goroutine is currently fetching the key, so wait for it to be done
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+
+		case <-request.done:
+			k, ok = request.value.Load().(Key)
+			if !ok {
+				err = ErrKeyNotFound
+			}
+		}
+
+		return
+	}
+
+	// this is the goroutine that is now responsible for fetching the key
+
 	var location string
 	if err == nil {
 		location, err = r.keyIDExpander.Expand(map[string]interface{}{
@@ -155,6 +225,16 @@ func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err e
 			}
 		}
 	}
+
+	// release the waiting goroutines before dispatching the event
+	r.resolveLock.Lock()
+	if k != nil {
+		r.keyRing.Add(k)
+		request.value.Store(k)
+	}
+
+	close(request.done)
+	r.resolveLock.Unlock()
 
 	r.dispatch(ResolveEvent{
 		URI:   location,

@@ -38,17 +38,24 @@ type KeyRing interface {
 	KeyAccessor
 	RefreshListener
 	ResolveListener
+
+	// Add allows ad hoc keys to be added to this ring.  Any key that has
+	// no key ID will be skipped.
+	//
+	// This method returns the actual count of keys added.  This will include
+	// keys already in the ring, since those will be overwritten with the new Key object.
+	Add(...Key) int
 }
 
-// NewKeyRing constructs an empty KeyRing.
+// NewKeyRing constructs a KeyRing with an optional set of initial keys.  Any key
+// that has no key ID is skipped.
 func NewKeyRing(initialKeys ...Key) KeyRing {
 	kr := &keyRing{
 		keys: make(map[string]Key, len(initialKeys)),
 	}
 
 	for _, k := range initialKeys {
-		keyID := k.KeyID()
-		if len(keyID) > 0 {
+		if keyID := k.KeyID(); len(keyID) > 0 {
 			kr.keys[keyID] = k
 		}
 	}
@@ -108,4 +115,18 @@ func (kr *keyRing) OnResolveEvent(event ResolveEvent) {
 	kr.lock.Lock()
 	kr.keys[event.KeyID] = event.Key
 	kr.lock.Unlock()
+}
+
+func (kr *keyRing) Add(keys ...Key) (n int) {
+	kr.lock.Lock()
+	defer kr.lock.Unlock()
+
+	for _, newKey := range keys {
+		if keyID := newKey.KeyID(); len(keyID) > 0 {
+			n++
+			kr.keys[keyID] = newKey
+		}
+	}
+
+	return
 }

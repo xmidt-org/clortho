@@ -130,6 +130,15 @@ func WithKeyIDTemplate(t string) ResolverOption {
 	})
 }
 
+// WithKeyRing sets a KeyRing to act as a cache for the Resolver.
+// By default, a Resolver is not associated with any KeyRing.
+func WithKeyRing(kr KeyRing) ResolverOption {
+	return resolverOptionFunc(func(r *resolver) error {
+		r.keyRing = kr
+		return nil
+	})
+}
+
 // RefresherOption is a configurable option passed to NewRefresher.
 type RefresherOption interface {
 	applyToRefresher(*refresher) error
