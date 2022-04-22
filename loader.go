@@ -64,9 +64,23 @@ func (hle *HTTPLoaderError) Error() string {
 	return fmt.Sprintf("Status code %d received from %s", hle.StatusCode, hle.Location)
 }
 
+// ContentMeta holds metadata about a piece of content.
 type ContentMeta struct {
-	Format       string
-	TTL          time.Duration
+	// Format describes the type of key content.  This will typically be either
+	// a file suffix (e.g. .pem, .jwk) or a media type (e.g. application/json, application/json+jwk).
+	// A custom Loader is free to produce its own format values, which must be
+	// understood by a corresponding Parser.
+	Format string
+
+	// TTL is the length of time this content is considered current.  A Refresher will
+	// use this value to determine when to load content again.
+	TTL time.Duration
+
+	// LastModified is the modification timestamp of the content.  For files, this will be
+	// the FileInfo.ModTime() value.  For HTTP responses, this will be the Last-Modified header.
+	//
+	// In the case of HTTP, this field is also used to supply a Last-Modified header in the
+	// request.
 	LastModified time.Time
 }
 
@@ -89,18 +103,6 @@ type Loader interface {
 	// caching.  This returned metadata can be passed to subsequent calls to make key retrieval more
 	// efficient.
 	LoadContent(ctx context.Context, location string, meta ContentMeta) ([]byte, ContentMeta, error)
-}
-
-var defaultLoader Loader
-
-func init() {
-	defaultLoader, _ = NewLoader()
-}
-
-// DefaultLoader returns the singleton default Loader instance, which is equivalent
-// to what would be returned by calling NewLoader with no options.
-func DefaultLoader() Loader {
-	return defaultLoader
 }
 
 // NewLoader builds a Loader from a set of options.

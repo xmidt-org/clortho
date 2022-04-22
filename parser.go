@@ -65,18 +65,6 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 	return
 }
 
-var defaultParser Parser
-
-func init() {
-	defaultParser, _ = NewParser()
-}
-
-// DefaultParser returns the singleton default Parser instance, which is equivalent
-// to what would be returned by calling NewParser with no options.
-func DefaultParser() Parser {
-	return defaultParser
-}
-
 // NewParser returns a Parser tailored with the given options.
 //
 // The returned Parser handles the following formats by default:

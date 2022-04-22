@@ -54,14 +54,20 @@ func NewFetcher(options ...FetcherOption) (Fetcher, error) {
 		err error
 
 		f = &fetcher{
-			loader:    DefaultLoader(),
-			parser:    DefaultParser(),
 			keyIDHash: crypto.SHA256,
 		}
 	)
 
 	for _, o := range options {
 		err = multierr.Append(err, o.applyToFetcher(f))
+	}
+
+	if f.loader == nil {
+		f.loader, _ = NewLoader()
+	}
+
+	if f.parser == nil {
+		f.parser, _ = NewParser()
 	}
 
 	return f, err
