@@ -33,14 +33,14 @@ import (
 	"go.uber.org/multierr"
 )
 
-// UnsupportedLocationError indicates that a URI location couldn't be handled
-// by a Loader.
-type UnsupportedLocationError struct {
+// UnsupportedSchemeError indicates that a URI's scheme was not registered
+// and couldn't be handled by a Loader.
+type UnsupportedSchemeError struct {
 	Location string
 }
 
-func (ule *UnsupportedLocationError) Error() string {
-	return fmt.Sprintf("Cannot load key(s) from unsupported location: %s", ule.Location)
+func (use *UnsupportedSchemeError) Error() string {
+	return fmt.Sprintf("Scheme is not supported for location: %s", use.Location)
 }
 
 // NotAFileError indicates that a file URI didn't refer to a system file, but instead
@@ -159,7 +159,7 @@ func (ls *loaders) LoadContent(ctx context.Context, location string, meta Conten
 		return l.LoadContent(ctx, location, meta)
 	}
 
-	return nil, meta, &UnsupportedLocationError{
+	return nil, meta, &UnsupportedSchemeError{
 		Location: location,
 	}
 }
@@ -241,10 +241,6 @@ func (hl *HTTPLoader) transact(request *http.Request, meta ContentMeta) (respons
 
 func (hl *HTTPLoader) newMeta(response *http.Response) (meta ContentMeta) {
 	meta.Format = response.Header.Get("Content-Type")
-	if len(meta.Format) == 0 {
-		meta.Format = DefaultHTTPFormat
-	}
-
 	var err error
 
 	if lastModified := response.Header.Get("Last-Modified"); len(lastModified) > 0 {
@@ -325,10 +321,6 @@ func (fl *FileLoader) readContent(location, path string, fi fs.FileInfo) ([]byte
 
 func (fl *FileLoader) newMeta(path string, fi fs.FileInfo) (meta ContentMeta) {
 	meta.Format = filepath.Ext(path)
-	if len(meta.Format) == 0 {
-		meta.Format = DefaultFileFormat
-	}
-
 	meta.LastModified = fi.ModTime()
 	return
 }
