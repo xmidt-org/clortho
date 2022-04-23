@@ -24,12 +24,12 @@ import (
 	"go.uber.org/multierr"
 )
 
-type NoParserConfiguredError struct {
+type UnsupportedFormatError struct {
 	Format string
 }
 
-func (npce *NoParserConfiguredError) Error() string {
-	return fmt.Sprintf("No parser configured for format %s", npce.Format)
+func (ufe *UnsupportedFormatError) Error() string {
+	return fmt.Sprintf("No parser configured for format %s", ufe.Format)
 }
 
 // Parser turns raw data into one or more Key instances.
@@ -57,7 +57,7 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 	if p, ok := ps.p[format]; ok {
 		keys, err = p.Parse(format, content)
 	} else {
-		err = &NoParserConfiguredError{
+		err = &UnsupportedFormatError{
 			Format: format,
 		}
 	}
@@ -80,10 +80,6 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 //
 // A caller can use WithFormats to change the parser associated with a format or
 // to register a Parser for a new, custom format.
-//
-// The Parser returned by this function guarantees that all keys have a key ID.  A thumbprint
-// using the WithKeyIDHash option is used to generate key IDs as needed.  By default, SHA256
-// is used if WithKeyIDHash option is supplied.
 func NewParser(options ...ParserOption) (Parser, error) {
 	var (
 		err error
