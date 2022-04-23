@@ -36,18 +36,6 @@ type Fetcher interface {
 	Fetch(ctx context.Context, location string, prev ContentMeta) (keys []Key, next ContentMeta, err error)
 }
 
-var defaultFetcher Fetcher
-
-func init() {
-	defaultFetcher, _ = NewFetcher()
-}
-
-// DefaultFetcher returns the singleton default Fetcher instance, which is equivalent to what would
-// be created by calling NewFetcher with no options.
-func DefaultFetcher() Fetcher {
-	return defaultFetcher
-}
-
 // NewFetcher produces a Fetcher from a set of configuration options.
 func NewFetcher(options ...FetcherOption) (Fetcher, error) {
 	var (

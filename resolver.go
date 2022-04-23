@@ -93,13 +93,16 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 		err error
 
 		r = &resolver{
-			fetcher: DefaultFetcher(),
 			pending: pendingResolverRequests{},
 		}
 	)
 
 	for _, o := range options {
 		err = multierr.Append(err, o.applyToResolver(r))
+	}
+
+	if r.fetcher == nil {
+		r.fetcher, _ = NewFetcher()
 	}
 
 	if r.keyIDExpander == nil {

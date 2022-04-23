@@ -96,12 +96,15 @@ type Refresher interface {
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
-		fetcher: DefaultFetcher(),
-		clock:   chronon.SystemClock(),
+		clock: chronon.SystemClock(),
 	}
 
 	for _, o := range options {
 		err = multierr.Append(err, o.applyToRefresher(r))
+	}
+
+	if r.fetcher == nil {
+		r.fetcher, _ = NewFetcher()
 	}
 
 	var validationErr error
