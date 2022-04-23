@@ -158,45 +158,26 @@ func (r *resolver) checkKeyRing(keyID string) (k Key, ok bool) {
 	return
 }
 
-func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
-	var ok bool
-	if k, ok = r.checkKeyRing(keyID); ok {
-		return
-	}
+func (r *resolver) waitForKey(ctx context.Context, request *pendingResolverRequest) (k Key, err error) {
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
 
-	r.resolveLock.Lock()
-	if k, ok = r.checkKeyRing(keyID); ok {
-		r.resolveLock.Unlock()
-		return
-	}
-
-	request, wait := r.pending.requestFor(keyID)
-	r.resolveLock.Unlock()
-
-	if wait {
-		// another goroutine is currently fetching the key, so wait for it to be done
-		select {
-		case <-ctx.Done():
-			err = ctx.Err()
-
-		case <-request.done:
-			k, ok = request.value.Load().(Key)
-			if !ok {
-				err = ErrKeyNotFound
-			}
+	case <-request.done:
+		var ok bool
+		k, ok = request.value.Load().(Key)
+		if !ok {
+			err = ErrKeyNotFound
 		}
-
-		return
 	}
 
-	// this is the goroutine that is now responsible for fetching the key
+	return
+}
 
-	var location string
-	if err == nil {
-		location, err = r.keyIDExpander.Expand(map[string]interface{}{
-			KeyIDParameterName: keyID,
-		})
-	}
+func (r *resolver) fetchKey(ctx context.Context, keyID string, request *pendingResolverRequest) (location string, k Key, err error) {
+	location, err = r.keyIDExpander.Expand(map[string]interface{}{
+		KeyIDParameterName: keyID,
+	})
 
 	var keys []Key
 	if err == nil {
@@ -226,22 +207,49 @@ func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err e
 		}
 	}
 
-	// release the waiting goroutines before dispatching the event
-	r.resolveLock.Lock()
-	if k != nil {
-		r.keyRing.Add(k)
-		request.value.Store(k)
+	return
+}
+
+func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
+	var ok bool
+	if k, ok = r.checkKeyRing(keyID); ok {
+		return
 	}
 
-	close(request.done)
+	r.resolveLock.Lock()
+	if k, ok = r.checkKeyRing(keyID); ok {
+		r.resolveLock.Unlock()
+		return
+	}
+
+	request, wait := r.pending.requestFor(keyID)
 	r.resolveLock.Unlock()
 
-	r.dispatch(ResolveEvent{
-		URI:   location,
-		Key:   k,
-		KeyID: keyID,
-		Err:   err,
-	})
+	if wait {
+		// another goroutine is currently fetching the key, so wait for it to be done
+		k, err = r.waitForKey(ctx, request)
+	} else {
+		// this is the goroutine that is now responsible for fetching the key
+		var location string
+		location, k, err = r.fetchKey(ctx, keyID, request)
+
+		// release the waiting goroutines before dispatching the event
+		r.resolveLock.Lock()
+		if k != nil {
+			r.keyRing.Add(k)
+			request.value.Store(k)
+		}
+
+		close(request.done)
+		r.resolveLock.Unlock()
+
+		r.dispatch(ResolveEvent{
+			URI:   location,
+			Key:   k,
+			KeyID: keyID,
+			Err:   err,
+		})
+	}
 
 	return
 }
