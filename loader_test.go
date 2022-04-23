@@ -3,6 +3,7 @@ package clortho
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"strconv"
@@ -64,7 +65,7 @@ func (suite *LoaderSuite) createFile(suffix, content string) (string, os.FileInf
 	return path, fi
 }
 
-func (suite *LoaderSuite) TestFileLoader() {
+func (suite *LoaderSuite) testFileSimple() {
 	suffixes := []string{
 		SuffixJSON,
 		SuffixJWK,
@@ -117,7 +118,7 @@ func (suite *LoaderSuite) TestFileLoader() {
 	}
 }
 
-func (suite *LoaderSuite) TestNotAFile() {
+func (suite *LoaderSuite) testFileNotAFile() {
 	l := suite.newLoader()
 	content, meta, err := l.LoadContent(context.Background(), suite.testDirectory, ContentMeta{})
 	suite.Empty(content)
@@ -130,7 +131,7 @@ func (suite *LoaderSuite) TestNotAFile() {
 	suite.Contains(naf.Error(), suite.testDirectory)
 }
 
-func (suite *LoaderSuite) TestInvalidFileURI() {
+func (suite *LoaderSuite) testFileInvalidURI() {
 	l := suite.newLoader()
 	content, meta, err := l.LoadContent(context.Background(), "file://\b\t", ContentMeta{})
 	suite.Empty(content)
@@ -138,53 +139,340 @@ func (suite *LoaderSuite) TestInvalidFileURI() {
 	suite.Require().Error(err)
 }
 
+func (suite *LoaderSuite) testFileMissing() {
+	l := suite.newLoader()
+	content, meta, err := l.LoadContent(context.Background(), "/no/such/file", ContentMeta{})
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.ErrorIs(err, fs.ErrNotExist)
+}
+
+func (suite *LoaderSuite) TestFileLoader() {
+	suite.Run("Simple", suite.testFileSimple)
+	suite.Run("NotAFile", suite.testFileNotAFile)
+	suite.Run("InvalidURI", suite.testFileInvalidURI)
+	suite.Run("Missing", suite.testFileMissing)
+}
+
+func (suite *LoaderSuite) testHTTPSimple() {
+	defer gock.Off()
+	gock.New("http://getkeys.com").
+		Get("/keys").
+		Reply(http.StatusOK).
+		BodyString(keyContent).
+		SetHeader("Content-Type", MediaTypeJWK)
+
+	content, meta, err := suite.newLoader().LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{},
+	)
+
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+	suite.NoError(err)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPClientError() {
+	expectedError := errors.New("expected")
+
+	defer gock.Off()
+	gock.New("http://getkeys.com").
+		Get("/keys").
+		Reply(http.StatusOK).
+		SetError(expectedError)
+
+	content, meta, err := suite.newLoader().LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{},
+	)
+
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.ErrorIs(err, expectedError)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPCustomLoader() {
+	var (
+		client  = new(http.Client)
+		encoder = HTTPEncoder(func(ctx context.Context, r *http.Request) error {
+			r.Header.Set("Custom", "true")
+
+			// should be a non-background context
+			suite.NotNil(ctx.Done())
+
+			return nil
+		})
+
+		l = suite.newLoader(
+			WithSchemes(
+				HTTPLoader{
+					Client:   client,
+					Encoders: []HTTPEncoder{encoder},
+					Timeout:  5 * time.Minute,
+				},
+				"http",
+			),
+		)
+	)
+
+	defer gock.Off()
+	defer gock.RestoreClient(client)
+	gock.InterceptClient(client)
+	gock.New("http://getkeys.com").
+		Get("/keys").
+		MatchHeader("Custom", "true").
+		Reply(http.StatusOK).
+		BodyString(keyContent).
+		SetHeader("Content-Type", MediaTypeJWK)
+
+	content, meta, err := l.LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{},
+	)
+
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+	suite.NoError(err)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPCustomLoaderDefaultClient() {
+	var (
+		encoder = HTTPEncoder(func(ctx context.Context, r *http.Request) error {
+			r.Header.Set("Custom", "true")
+
+			// should be a non-background context
+			suite.NotNil(ctx.Done())
+
+			return nil
+		})
+
+		l = suite.newLoader(
+			WithSchemes(
+				HTTPLoader{
+					Encoders: []HTTPEncoder{encoder},
+					Timeout:  5 * time.Minute,
+				},
+				"http",
+			),
+		)
+	)
+
+	defer gock.Off()
+	gock.New("http://getkeys.com").
+		Get("/keys").
+		MatchHeader("Custom", "true").
+		Reply(http.StatusOK).
+		BodyString(keyContent).
+		SetHeader("Content-Type", MediaTypeJWK)
+
+	content, meta, err := l.LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{},
+	)
+
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+	suite.NoError(err)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPCustomLoaderEncoderError() {
+	var (
+		expectedError = errors.New("expected")
+
+		encoder = HTTPEncoder(func(ctx context.Context, r *http.Request) error {
+			return expectedError
+		})
+
+		l = suite.newLoader(
+			WithSchemes(
+				HTTPLoader{
+					Encoders: []HTTPEncoder{encoder},
+				},
+				"http",
+			),
+		)
+	)
+
+	defer gock.Off()
+
+	// the encoder will return an error, so we'll never invoke the HTTP client
+	content, meta, err := l.LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{},
+	)
+
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.ErrorIs(err, expectedError)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPStatusNotModified() {
+	defer gock.Off()
+	gock.New("http://getkeys.com").
+		Get("/keys").
+		Reply(http.StatusNotModified)
+
+	content, meta, err := suite.newLoader().LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{},
+	)
+
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.NoError(err)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPLastModified() {
+	var (
+		requestLastModified  = time.Now().Truncate(time.Second)
+		responseLastModified = requestLastModified.Add(time.Hour)
+	)
+
+	defer gock.Off()
+	gock.New("http://getkeys.com").
+		Get("/keys").
+		MatchHeader("If-Modified-Since", requestLastModified.Format(time.RFC1123)).
+		Reply(http.StatusOK).
+		BodyString(keyContent).
+		SetHeader("Content-Type", MediaTypeJWK).
+		SetHeader("Last-Modified", responseLastModified.Format(time.RFC1123))
+
+	content, meta, err := suite.newLoader().LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{
+			LastModified: requestLastModified,
+		},
+	)
+
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: MediaTypeJWK, LastModified: responseLastModified}, meta)
+	suite.NoError(err)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPLastModifiedInvalid() {
+	requestLastModified := time.Now().Truncate(time.Second)
+
+	defer gock.Off()
+	gock.New("http://getkeys.com").
+		Get("/keys").
+		MatchHeader("If-Modified-Since", requestLastModified.Format(time.RFC1123)).
+		Reply(http.StatusOK).
+		BodyString(keyContent).
+		SetHeader("Content-Type", MediaTypeJWK).
+		SetHeader("Last-Modified", "this is not a valid RFC1123 timestamp")
+
+	content, meta, err := suite.newLoader().LoadContent(
+		context.Background(),
+		"http://getkeys.com/keys",
+		ContentMeta{
+			LastModified: requestLastModified,
+		},
+	)
+
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+	suite.NoError(err)
+	suite.True(gock.IsDone())
+}
+
+func (suite *LoaderSuite) testHTTPCacheControl() {
+	const expectedTTL = 100 * time.Second
+
+	values := []string{
+		"max-age=100",
+		"no-store, max-age=100",
+	}
+
+	for _, value := range values {
+		suite.Run(value, func() {
+			defer gock.Off()
+			gock.New("http://getkeys.com").
+				Get("/keys").
+				Reply(http.StatusOK).
+				SetHeader("Content-Type", MediaTypeJWKSet).
+				SetHeader("Cache-Control", value).
+				BodyString(keyContent)
+
+			content, meta, err := suite.newLoader().LoadContent(
+				context.Background(),
+				"http://getkeys.com/keys",
+				ContentMeta{},
+			)
+
+			suite.Equal(keyContent, string(content))
+			suite.Equal(
+				ContentMeta{
+					Format: MediaTypeJWKSet,
+					TTL:    expectedTTL,
+				},
+				meta,
+			)
+
+			suite.NoError(err)
+			suite.True(gock.IsDone())
+		})
+	}
+}
+
+func (suite *LoaderSuite) testHTTPErrorStatus() {
+	// just a few examples of error codes that produce HTTPLoaderError
+	errorStatusCodes := []int{
+		http.StatusBadRequest,
+		http.StatusNotFound,
+		http.StatusInternalServerError,
+	}
+
+	for _, statusCode := range errorStatusCodes {
+		suite.Run(strconv.Itoa(statusCode), func() {
+			defer gock.Off()
+			gock.New("http://getkeys.com").
+				Get("/keys").
+				Reply(statusCode)
+
+			content, meta, err := suite.newLoader().LoadContent(
+				context.Background(),
+				"http://getkeys.com/keys",
+				ContentMeta{},
+			)
+
+			suite.Empty(content)
+			suite.Equal(ContentMeta{}, meta)
+			suite.Require().Error(err)
+
+			var hle *HTTPLoaderError
+			suite.Require().ErrorAs(err, &hle)
+			suite.Equal(statusCode, hle.StatusCode)
+			suite.Contains(hle.Error(), "http://getkeys.com/keys")
+			suite.Contains(hle.Error(), strconv.Itoa(statusCode))
+		})
+	}
+}
+
 func (suite *LoaderSuite) TestHTTPLoader() {
-	suite.Run("Simple", func() {
-		defer gock.Off()
-		gock.New("http://getkeys.com").
-			Get("/keys").
-			Reply(http.StatusOK).
-			BodyString(keyContent).
-			SetHeader("Content-Type", MediaTypeJWK)
-
-		l := suite.newLoader()
-		content, meta, err := l.LoadContent(context.Background(), "http://getkeys.com/keys", ContentMeta{})
-		suite.Equal(keyContent, string(content))
-		suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
-		suite.NoError(err)
-		suite.True(gock.IsDone())
-	})
-
-	suite.Run("LastModified", func() {
-		defer gock.Off()
-
-		var (
-			requestLastModified  = time.Now().Truncate(time.Second)
-			responseLastModified = requestLastModified.Add(time.Hour)
-		)
-
-		gock.New("http://getkeys.com").
-			Get("/keys").
-			MatchHeader("If-Modified-Since", requestLastModified.Format(time.RFC1123)).
-			Reply(http.StatusOK).
-			BodyString(keyContent).
-			SetHeader("Content-Type", MediaTypeJWK).
-			SetHeader("Last-Modified", responseLastModified.Format(time.RFC1123))
-
-		l := suite.newLoader()
-		content, meta, err := l.LoadContent(
-			context.Background(),
-			"http://getkeys.com/keys",
-			ContentMeta{
-				LastModified: requestLastModified,
-			},
-		)
-
-		suite.Equal(keyContent, string(content))
-		suite.Equal(ContentMeta{Format: MediaTypeJWK, LastModified: responseLastModified}, meta)
-		suite.NoError(err)
-		suite.True(gock.IsDone())
-	})
+	suite.Run("Simple", suite.testHTTPSimple)
+	suite.Run("ClientError", suite.testHTTPClientError)
+	suite.Run("CustomLoader", suite.testHTTPCustomLoader)
+	suite.Run("CustomLoader/DefaultClient", suite.testHTTPCustomLoaderDefaultClient)
+	suite.Run("CustomLoader/EncoderError", suite.testHTTPCustomLoaderEncoderError)
+	suite.Run("StatusNotModified", suite.testHTTPStatusNotModified)
+	suite.Run("Last-Modified", suite.testHTTPLastModified)
+	suite.Run("Last-Modified/Invalid", suite.testHTTPLastModifiedInvalid)
+	suite.Run("Cache-Control", suite.testHTTPCacheControl)
+	suite.Run("ErrorStatus", suite.testHTTPErrorStatus)
 }
 
 func (suite *LoaderSuite) TestCustomLoader() {
@@ -218,7 +506,7 @@ func (suite *LoaderSuite) TestUnsupportedScheme() {
 	suite.Require().Error(err)
 
 	var use *UnsupportedSchemeError
-	suite.Require().True(errors.As(err, &use))
+	suite.Require().ErrorAs(err, &use)
 	suite.Equal(unsupported, use.Location)
 	suite.Contains(use.Error(), unsupported)
 }

@@ -218,17 +218,17 @@ func (hl *HTTPLoader) transact(request *http.Request, meta ContentMeta) (respons
 
 	switch response.StatusCode {
 	case http.StatusNotModified:
-		// because we honor ETag and Last-Modified headers, the server
+		// because we honor the Last-Modified header, the server
 		// can legitimately response with this status code.  we can
 		// just ignore anything in the body.
 
 	case http.StatusOK:
+		// NOTE: Content-Length is required for HTTP/1.1+
+		// we explicitly require that header here
 		cl := response.ContentLength
 		if cl > 0 {
 			data = make([]byte, cl)
 			_, err = io.ReadFull(response.Body, data)
-		} else {
-			data, err = io.ReadAll(response.Body)
 		}
 
 	default:
