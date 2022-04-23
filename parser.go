@@ -18,14 +18,28 @@
 package clortho
 
 import (
+	"fmt"
+
 	"github.com/lestrrat-go/jwx/jwk"
 	"go.uber.org/multierr"
 )
+
+type NoParserConfiguredError struct {
+	Format string
+}
+
+func (npce *NoParserConfiguredError) Error() string {
+	return fmt.Sprintf("No parser configured for format %s", npce.Format)
+}
 
 // Parser turns raw data into one or more Key instances.
 type Parser interface {
 	// Parse parses data, expected to be in the given format, into zero or more Keys.
 	// If only one key is present in the data, this method returns a 1-element slice.
+	//
+	// Format is an opaque string which used as a key to determine which parsing algorithm
+	// to apply to the data.  Most commonly, format is either a file suffix (including the
+	// leading '.') or a media type such as application/json.
 	//
 	// Custom parsers should usually avoid trying to validate format.  This is because
 	// a Parser might be registered with a nonstandard format.  The format is available to
@@ -43,24 +57,12 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 	if p, ok := ps.p[format]; ok {
 		keys, err = p.Parse(format, content)
 	} else {
-		err = &UnsupportedFormatError{
+		err = &NoParserConfiguredError{
 			Format: format,
 		}
 	}
 
 	return
-}
-
-var defaultParser Parser
-
-func init() {
-	defaultParser, _ = NewParser()
-}
-
-// DefaultParser returns the singleton default Parser instance, which is equivalent
-// to what would be returned by calling NewParser with no options.
-func DefaultParser() Parser {
-	return defaultParser
 }
 
 // NewParser returns a Parser tailored with the given options.
@@ -98,17 +100,17 @@ func NewParser(options ...ParserOption) (Parser, error) {
 
 		ps = &parsers{
 			p: map[string]Parser{
-				MediaTypeJSON: jsp,
-				SuffixJSON:    jsp,
-
-				MediaTypeJWK: jp,
-				SuffixJWK:    jp,
-
-				MediaTypeJWKSet: jsp,
-				SuffixJWKSet:    jsp,
-
-				MediaTypePEM: usePEM,
 				SuffixPEM:    usePEM,
+				MediaTypePEM: usePEM,
+
+				SuffixJSON:    jsp,
+				MediaTypeJSON: jsp,
+
+				SuffixJWK:    jp,
+				MediaTypeJWK: jp,
+
+				SuffixJWKSet:    jsp,
+				MediaTypeJWKSet: jsp,
 			},
 		}
 	)

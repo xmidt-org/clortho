@@ -33,14 +33,14 @@ import (
 	"go.uber.org/multierr"
 )
 
-// UnsupportedLocationError indicates that a URI location couldn't be handled
-// by a Loader.
-type UnsupportedLocationError struct {
+// UnsupportedSchemeError indicates that a URI's scheme was not registered
+// and couldn't be handled by a Loader.
+type UnsupportedSchemeError struct {
 	Location string
 }
 
-func (ule *UnsupportedLocationError) Error() string {
-	return fmt.Sprintf("Cannot load key(s) from unsupported location: %s", ule.Location)
+func (use *UnsupportedSchemeError) Error() string {
+	return fmt.Sprintf("Scheme is not supported for location: %s", use.Location)
 }
 
 // NotAFileError indicates that a file URI didn't refer to a system file, but instead
@@ -64,9 +64,23 @@ func (hle *HTTPLoaderError) Error() string {
 	return fmt.Sprintf("Status code %d received from %s", hle.StatusCode, hle.Location)
 }
 
+// ContentMeta holds metadata about a piece of content.
 type ContentMeta struct {
-	Format       string
-	TTL          time.Duration
+	// Format describes the type of key content.  This will typically be either
+	// a file suffix (e.g. .pem, .jwk) or a media type (e.g. application/json, application/json+jwk).
+	// A custom Loader is free to produce its own format values, which must be
+	// understood by a corresponding Parser.
+	Format string
+
+	// TTL is the length of time this content is considered current.  A Refresher will
+	// use this value to determine when to load content again.
+	TTL time.Duration
+
+	// LastModified is the modification timestamp of the content.  For files, this will be
+	// the FileInfo.ModTime() value.  For HTTP responses, this will be the Last-Modified header.
+	//
+	// In the case of HTTP, this field is also used to supply a Last-Modified header in the
+	// request.
 	LastModified time.Time
 }
 
@@ -89,18 +103,6 @@ type Loader interface {
 	// caching.  This returned metadata can be passed to subsequent calls to make key retrieval more
 	// efficient.
 	LoadContent(ctx context.Context, location string, meta ContentMeta) ([]byte, ContentMeta, error)
-}
-
-var defaultLoader Loader
-
-func init() {
-	defaultLoader, _ = NewLoader()
-}
-
-// DefaultLoader returns the singleton default Loader instance, which is equivalent
-// to what would be returned by calling NewLoader with no options.
-func DefaultLoader() Loader {
-	return defaultLoader
 }
 
 // NewLoader builds a Loader from a set of options.
@@ -159,7 +161,7 @@ func (ls *loaders) LoadContent(ctx context.Context, location string, meta Conten
 		return l.LoadContent(ctx, location, meta)
 	}
 
-	return nil, meta, &UnsupportedLocationError{
+	return nil, meta, &UnsupportedSchemeError{
 		Location: location,
 	}
 }
@@ -216,17 +218,17 @@ func (hl *HTTPLoader) transact(request *http.Request, meta ContentMeta) (respons
 
 	switch response.StatusCode {
 	case http.StatusNotModified:
-		// because we honor ETag and Last-Modified headers, the server
+		// because we honor the Last-Modified header, the server
 		// can legitimately response with this status code.  we can
 		// just ignore anything in the body.
 
 	case http.StatusOK:
+		// NOTE: Content-Length is required for HTTP/1.1+
+		// we explicitly require that header here
 		cl := response.ContentLength
 		if cl > 0 {
 			data = make([]byte, cl)
 			_, err = io.ReadFull(response.Body, data)
-		} else {
-			data, err = io.ReadAll(response.Body)
 		}
 
 	default:
@@ -241,10 +243,6 @@ func (hl *HTTPLoader) transact(request *http.Request, meta ContentMeta) (respons
 
 func (hl *HTTPLoader) newMeta(response *http.Response) (meta ContentMeta) {
 	meta.Format = response.Header.Get("Content-Type")
-	if len(meta.Format) == 0 {
-		meta.Format = DefaultHTTPFormat
-	}
-
 	var err error
 
 	if lastModified := response.Header.Get("Last-Modified"); len(lastModified) > 0 {
@@ -325,10 +323,6 @@ func (fl *FileLoader) readContent(location, path string, fi fs.FileInfo) ([]byte
 
 func (fl *FileLoader) newMeta(path string, fi fs.FileInfo) (meta ContentMeta) {
 	meta.Format = filepath.Ext(path)
-	if len(meta.Format) == 0 {
-		meta.Format = DefaultFileFormat
-	}
-
 	meta.LastModified = fi.ModTime()
 	return
 }
