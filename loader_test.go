@@ -336,7 +336,8 @@ func (suite *LoaderSuite) testHTTPStatusNotModified() {
 
 func (suite *LoaderSuite) testHTTPLastModified() {
 	var (
-		requestLastModified  = time.Now().Truncate(time.Second)
+		// need to use UTC explicitly to avoid test noise
+		requestLastModified  = time.Now().UTC().Truncate(time.Second)
 		responseLastModified = requestLastModified.Add(time.Hour)
 	)
 
