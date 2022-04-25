@@ -151,6 +151,17 @@ func validateAndSetDefaults(in ...RefreshSource) (out []RefreshSource, err error
 	return
 }
 
+// FetchConfig configures how to fetch individual keys on demand.
+type FetchConfig struct {
+	// Template is a URI template used to fetch keys.  This template may
+	// use a single parameter named keyID, e.g. http://keys.com/{keyID}.
+	Template string `json:"template" yaml:"template"`
+
+	// Timeout refers to the maximum time to wait for a refresh operation.
+	// There is no default for this field.  If unset, no timeout is applied.
+	Timeout time.Duration `json:"timeout" yaml:"timeout"`
+}
+
 // RefreshConfig configures all aspects of key refresh.
 type RefreshConfig struct {
 	// Sources are the set of refresh sources to be polled for key material.
@@ -164,7 +175,11 @@ type RefreshConfig struct {
 
 // Config configures clortho from (possibly) externally unmarshaled locations.
 type Config struct {
+	// Fetch is the subset of configuration that establishes how individual
+	// keys will be fetched on demand.
+	Fetch FetchConfig `json:"fetch" yaml:"fetch"`
+
 	// Refresh is the subset of configuration that configures how keys are refreshed
 	// in the background.
-	Refresh RefreshConfig
+	Refresh RefreshConfig `json:"refresh" yaml:"refresh"`
 }

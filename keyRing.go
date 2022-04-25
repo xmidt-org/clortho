@@ -45,6 +45,10 @@ type KeyRing interface {
 	// This method returns the actual count of keys added.  This will include
 	// keys already in the ring, since those will be overwritten with the new Key object.
 	Add(...Key) int
+
+	// Remove allows add hoc keys to be removed from this ring.  Any key ID that isn't
+	// in this ring is ignored.  The actual count of deleted keys is returned.
+	Remove(keyIDs ...string) int
 }
 
 // NewKeyRing constructs a KeyRing with an optional set of initial keys.  Any key
@@ -125,6 +129,20 @@ func (kr *keyRing) Add(keys ...Key) (n int) {
 		if keyID := newKey.KeyID(); len(keyID) > 0 {
 			n++
 			kr.keys[keyID] = newKey
+		}
+	}
+
+	return
+}
+
+func (kr *keyRing) Remove(keyIDs ...string) (n int) {
+	kr.lock.Lock()
+	defer kr.lock.Unlock()
+
+	for _, keyID := range keyIDs {
+		if _, ok := kr.keys[keyID]; ok {
+			n++
+			delete(kr.keys, keyID)
 		}
 	}
 

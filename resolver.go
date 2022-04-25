@@ -29,7 +29,7 @@ import (
 
 const (
 	// KeyIDParameter is the name of the URI template parameter for expanding key URIs.
-	KeyIDParameterName = "keyId"
+	KeyIDParameterName = "keyID"
 )
 
 var (
@@ -76,8 +76,8 @@ func NewExpander(rawTemplate string) (Expander, error) {
 
 // Resolver allows synchronous resolution of keys.
 type Resolver interface {
-	// ResolveKeyID attempts to locate a key with a given keyID (kid).
-	ResolveKeyID(ctx context.Context, keyID string) (Key, error)
+	// Resolve attempts to locate a key with a given keyID (kid).
+	Resolve(ctx context.Context, keyID string) (Key, error)
 
 	// AddListener attaches a sink for ResolveEvents.  Only events that
 	// occur after this method call will be dispatched to the given listener.
@@ -106,6 +106,7 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 	}
 
 	if r.keyIDExpander == nil {
+		r = nil
 		err = multierr.Append(err, ErrNoTemplate)
 	}
 
@@ -116,6 +117,7 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 // code may use this to block on the results of a resolve operation happening in another
 // goroutine.
 type pendingResolverRequest struct {
+	keyID string
 	done  chan struct{}
 	value atomic.Value
 }
@@ -126,13 +128,19 @@ func (prr pendingResolverRequests) requestFor(keyID string) (r *pendingResolverR
 	r, wait = prr[keyID]
 	if !wait {
 		r = &pendingResolverRequest{
-			done: make(chan struct{}),
+			keyID: keyID,
+			done:  make(chan struct{}),
 		}
 
 		prr[keyID] = r
 	}
 
 	return
+}
+
+func (prr pendingResolverRequests) cleanup(request *pendingResolverRequest) {
+	delete(prr, request.keyID)
+	close(request.done)
 }
 
 // resolver is the internal Resolver implementation.
@@ -213,7 +221,7 @@ func (r *resolver) fetchKey(ctx context.Context, keyID string, request *pendingR
 	return
 }
 
-func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
+func (r *resolver) Resolve(ctx context.Context, keyID string) (k Key, err error) {
 	var ok bool
 	if k, ok = r.checkKeyRing(keyID); ok {
 		return
@@ -236,14 +244,16 @@ func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err e
 		var location string
 		location, k, err = r.fetchKey(ctx, keyID, request)
 
-		// release the waiting goroutines before dispatching the event
-		r.resolveLock.Lock()
-		if k != nil {
-			r.keyRing.Add(k)
+		if err == nil {
+			if r.keyRing != nil {
+				r.keyRing.Add(k)
+			}
+
 			request.value.Store(k)
 		}
 
-		close(request.done)
+		r.resolveLock.Lock()
+		r.pending.cleanup(request)
 		r.resolveLock.Unlock()
 
 		r.dispatch(ResolveEvent{

@@ -50,6 +50,10 @@ func (l *listeners) visit(f func(interface{})) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
+	if l.listeners == nil {
+		return
+	}
+
 	for e := l.listeners.Front(); e != nil; e = e.Next() {
 		f(e.Value)
 	}
