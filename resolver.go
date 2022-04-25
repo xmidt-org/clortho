@@ -117,6 +117,7 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 // code may use this to block on the results of a resolve operation happening in another
 // goroutine.
 type pendingResolverRequest struct {
+	keyID string
 	done  chan struct{}
 	value atomic.Value
 }
@@ -127,13 +128,19 @@ func (prr pendingResolverRequests) requestFor(keyID string) (r *pendingResolverR
 	r, wait = prr[keyID]
 	if !wait {
 		r = &pendingResolverRequest{
-			done: make(chan struct{}),
+			keyID: keyID,
+			done:  make(chan struct{}),
 		}
 
 		prr[keyID] = r
 	}
 
 	return
+}
+
+func (prr pendingResolverRequests) cleanup(request *pendingResolverRequest) {
+	delete(prr, request.keyID)
+	close(request.done)
 }
 
 // resolver is the internal Resolver implementation.
@@ -237,9 +244,7 @@ func (r *resolver) Resolve(ctx context.Context, keyID string) (k Key, err error)
 		var location string
 		location, k, err = r.fetchKey(ctx, keyID, request)
 
-		// release the waiting goroutines before dispatching the event
-		r.resolveLock.Lock()
-		if k != nil {
+		if err == nil {
 			if r.keyRing != nil {
 				r.keyRing.Add(k)
 			}
@@ -247,7 +252,8 @@ func (r *resolver) Resolve(ctx context.Context, keyID string) (k Key, err error)
 			request.value.Store(k)
 		}
 
-		close(request.done)
+		r.resolveLock.Lock()
+		r.pending.cleanup(request)
 		r.resolveLock.Unlock()
 
 		r.dispatch(ResolveEvent{

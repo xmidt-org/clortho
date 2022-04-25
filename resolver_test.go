@@ -2,7 +2,10 @@ package clortho
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 )
@@ -100,7 +103,7 @@ func (suite *ResolverSuite) TestDefault() {
 	suite.NotNil(r.(*resolver).fetcher)
 }
 
-func (suite *ResolverSuite) TestSimple() {
+func (suite *ResolverSuite) TestSingleKey() {
 	var (
 		f = new(mockFetcher)
 		r = suite.newResolver(
@@ -111,11 +114,232 @@ func (suite *ResolverSuite) TestSimple() {
 
 	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
 		Return([]Key{suite.testKey}, ContentMeta{}, error(nil)).
+		Twice()
+
+	key, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(key)
+	suite.Equal(suite.testKey, key)
+
+	// Because there is no key ring, this should fetch again
+	key, err = r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(key)
+	suite.Equal(suite.testKey, key)
+
+	f.AssertExpectations(suite.T())
+}
+
+func (suite *ResolverSuite) TestMultipleKeys() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
+		Return(suite.testKeySet, ContentMeta{}, error(nil)).
+		Twice()
+
+	key, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(key)
+	suite.Equal(suite.testKey, key)
+
+	// Because there is no key ring, this should fetch again
+	key, err = r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(key)
+	suite.Equal(suite.testKey, key)
+
+	f.AssertExpectations(suite.T())
+}
+
+func (suite *ResolverSuite) TestWithKeyRing() {
+	var (
+		keyRing  = NewKeyRing()
+		listener = new(mockResolveListener)
+
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithKeyRing(keyRing),
+			WithFetcher(f),
+			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
+		Return(suite.testKeySet, ContentMeta{}, error(nil)).
+		Twice()
+
+	listener.ExpectOnResolveEvent(ResolveEvent{
+		URI:   "http://getkeys.com/testKey",
+		KeyID: "testKey",
+		Key:   suite.testKey,
+		Err:   nil,
+	}).Once()
+
+	cancel := r.AddListener(listener)
+
+	key, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(key)
+	suite.Equal(suite.testKey, key)
+
+	// There is a key ring, so the key should be cached
+	key, ok := keyRing.Get("testKey")
+	suite.True(ok)
+	suite.Equal(suite.testKey, key)
+
+	key, err = r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(key)
+	suite.Equal(suite.testKey, key)
+
+	// Delete the cached key, and cancel the listener.
+	suite.Equal(1, keyRing.Remove("testKey"))
+	cancel()
+
+	key, err = r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(key)
+	suite.Equal(suite.testKey, key)
+
+	key, ok = keyRing.Get("testKey")
+	suite.True(ok)
+	suite.Equal(suite.testKey, key)
+
+	f.AssertExpectations(suite.T())
+}
+
+func (suite *ResolverSuite) TestNoKey() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
+		Return([]Key{}, ContentMeta{}, error(nil)).
+		Twice()
+
+	key, err := r.Resolve(context.Background(), "testKey")
+	suite.Nil(key)
+	suite.ErrorIs(err, ErrKeyNotFound)
+
+	// Because there is no key ring, this should fetch again
+	key, err = r.Resolve(context.Background(), "testKey")
+	suite.Nil(key)
+	suite.ErrorIs(err, ErrKeyNotFound)
+
+	f.AssertExpectations(suite.T())
+}
+
+func (suite *ResolverSuite) TestMissingKey() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), "http://getkeys.com/nosuchKey", ContentMeta{}).
+		Return(suite.testKeySet, ContentMeta{}, error(nil)).
+		Once()
+
+	key, err := r.Resolve(context.Background(), "nosuchKey")
+	suite.Nil(key)
+	suite.ErrorIs(err, ErrKeyNotFound)
+
+	f.AssertExpectations(suite.T())
+}
+
+func (suite *ResolverSuite) TestFetcherError() {
+	var (
+		expectedError = errors.New("expected")
+
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
+		Return([]Key{}, ContentMeta{}, expectedError).
 		Once()
 
 	key, err := r.Resolve(context.Background(), "testKey")
-	suite.NoError(err)
-	suite.Require().NotNil(key)
+	suite.Nil(key)
+	suite.ErrorIs(err, expectedError)
+
+	f.AssertExpectations(suite.T())
+}
+
+func (suite *ResolverSuite) TestConcurrentFetch() {
+	type result struct {
+		key Key
+		err error
+	}
+
+	var (
+		keyRing  = NewKeyRing()
+		listener = new(mockResolveListener)
+
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithKeyRing(keyRing),
+			WithFetcher(f),
+			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+		)
+
+		fetchReady = new(sync.WaitGroup)
+		results    = make(chan result, 3)
+	)
+
+	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
+		Return([]Key{suite.testKey}, ContentMeta{}, error(nil)).
+		Once()
+
+	listener.ExpectOnResolveEvent(ResolveEvent{
+		URI:   "http://getkeys.com/testKey",
+		KeyID: "testKey",
+		Key:   suite.testKey,
+		Err:   nil,
+	}).Once()
+
+	r.AddListener(listener)
+
+	// spawn several requests, only one of which should actually call the Fetcher
+	for i := 0; i < 3; i++ {
+		fetchReady.Add(1)
+		go func() {
+			fetchReady.Done()
+			key, err := r.Resolve(context.Background(), "testKey")
+			results <- result{key: key, err: err}
+		}()
+	}
+
+	fetchReady.Wait() // make sure all goroutines have started
+	timeout := time.After(15 * time.Second)
+	for i := 0; i < 3; i++ {
+		select {
+		case <-timeout:
+			suite.Fail("Not all resolve calls finished")
+
+		case result := <-results:
+			suite.NoError(result.err)
+			suite.Equal(suite.testKey, result.key)
+		}
+	}
+
+	key, ok := keyRing.Get("testKey")
+	suite.True(ok)
 	suite.Equal(suite.testKey, key)
 
 	f.AssertExpectations(suite.T())

@@ -49,3 +49,15 @@ func (m *mockFetcher) Fetch(ctx context.Context, location string, prev ContentMe
 func (m *mockFetcher) ExpectFetch(ctx context.Context, location string, prev ContentMeta) *mock.Call {
 	return m.On("Fetch", ctx, location, prev)
 }
+
+type mockResolveListener struct {
+	mock.Mock
+}
+
+func (m *mockResolveListener) OnResolveEvent(event ResolveEvent) {
+	m.Called(event)
+}
+
+func (m *mockResolveListener) ExpectOnResolveEvent(event ResolveEvent) *mock.Call {
+	return m.On("OnResolveEvent", event)
+}
