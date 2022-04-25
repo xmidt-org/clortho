@@ -220,7 +220,7 @@ func (rt *refreshTask) computeNextRefresh(meta ContentMeta, err error) (next tim
 	return
 }
 
-func (rt *refreshTask) newKeyMap(keys []Key) (m map[string]Key, err error) {
+func (rt *refreshTask) newKeyMap(keys []Key) (m map[string]Key) {
 	m = make(map[string]Key, len(keys))
 	for _, k := range keys {
 		m[k.KeyID()] = k
@@ -269,8 +269,7 @@ func (rt *refreshTask) run(ctx context.Context) {
 			return
 
 		case err == nil:
-			// TODO: handle the error somehow
-			nextKeyMap, _ := rt.newKeyMap(nextKeys)
+			nextKeyMap := rt.newKeyMap(nextKeys)
 
 			event.Keys = make([]Key, len(nextKeys))
 			copy(event.Keys, nextKeys)
