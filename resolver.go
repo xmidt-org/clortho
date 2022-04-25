@@ -29,7 +29,7 @@ import (
 
 const (
 	// KeyIDParameter is the name of the URI template parameter for expanding key URIs.
-	KeyIDParameterName = "keyId"
+	KeyIDParameterName = "keyID"
 )
 
 var (
@@ -76,8 +76,8 @@ func NewExpander(rawTemplate string) (Expander, error) {
 
 // Resolver allows synchronous resolution of keys.
 type Resolver interface {
-	// ResolveKeyID attempts to locate a key with a given keyID (kid).
-	ResolveKeyID(ctx context.Context, keyID string) (Key, error)
+	// Resolve attempts to locate a key with a given keyID (kid).
+	Resolve(ctx context.Context, keyID string) (Key, error)
 
 	// AddListener attaches a sink for ResolveEvents.  Only events that
 	// occur after this method call will be dispatched to the given listener.
@@ -106,6 +106,7 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 	}
 
 	if r.keyIDExpander == nil {
+		r = nil
 		err = multierr.Append(err, ErrNoTemplate)
 	}
 
@@ -213,7 +214,7 @@ func (r *resolver) fetchKey(ctx context.Context, keyID string, request *pendingR
 	return
 }
 
-func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err error) {
+func (r *resolver) Resolve(ctx context.Context, keyID string) (k Key, err error) {
 	var ok bool
 	if k, ok = r.checkKeyRing(keyID); ok {
 		return
@@ -239,7 +240,10 @@ func (r *resolver) ResolveKeyID(ctx context.Context, keyID string) (k Key, err e
 		// release the waiting goroutines before dispatching the event
 		r.resolveLock.Lock()
 		if k != nil {
-			r.keyRing.Add(k)
+			if r.keyRing != nil {
+				r.keyRing.Add(k)
+			}
+
 			request.value.Store(k)
 		}
 
