@@ -106,10 +106,7 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 		r.fetcher, _ = NewFetcher()
 	}
 
-	var validationErr error
-	r.sources, validationErr = validateAndSetDefaults(r.sources...)
-	err = multierr.Append(err, validationErr)
-
+	err = multierr.Append(err, validateRefreshSources(r.sources...))
 	return r, err
 }
 
