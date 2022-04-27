@@ -107,6 +107,10 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	}
 
 	err = multierr.Append(err, validateRefreshSources(r.sources...))
+	if err != nil {
+		r = nil
+	}
+
 	return r, err
 }
 
