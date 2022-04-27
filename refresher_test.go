@@ -293,6 +293,31 @@ func (suite *RefresherSuite) TestStopDuringFetch() {
 	listener.AssertExpectations(suite.T())
 }
 
+func (suite *RefresherSuite) TestMissingURI() {
+	r, err := NewRefresher(
+		WithSources(RefreshSource{}),
+	)
+
+	suite.Nil(r)
+	suite.Require().Error(err)
+}
+
+func (suite *RefresherSuite) TestDuplicateURI() {
+	r, err := NewRefresher(
+		WithSources(
+			RefreshSource{
+				URI: "http://duplicate.net",
+			},
+			RefreshSource{
+				URI: "http://duplicate.net",
+			},
+		),
+	)
+
+	suite.Nil(r)
+	suite.Require().Error(err)
+}
+
 func TestRefresher(t *testing.T) {
 	suite.Run(t, new(RefresherSuite))
 }
