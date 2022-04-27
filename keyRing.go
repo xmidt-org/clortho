@@ -88,7 +88,7 @@ func (kr *keyRing) Len() (n int) {
 
 func (kr *keyRing) OnRefreshEvent(event RefreshEvent) {
 	// check if this event represents an actual change to the set of keys
-	if event.Err != nil || (len(event.New) == 0 && len(event.Deleted) == 0) {
+	if event.Err != nil || (len(event.Keys) == 0 && len(event.Deleted) == 0) {
 		return
 	}
 
