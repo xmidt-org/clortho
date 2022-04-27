@@ -20,10 +20,8 @@ package clortho
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/xmidt-org/chronon"
 	"go.uber.org/multierr"
@@ -140,18 +138,12 @@ func (r *refresher) Start(_ context.Context) error {
 	taskCtx, taskCancel := context.WithCancel(context.Background())
 	for _, s := range r.sources {
 		var (
-			// precompute the jitter range for the configured interval
-			jitterLo = int64((1.0 - s.Jitter) * float64(s.Interval))
-			jitterHi = int64((1.0 + s.Jitter) * float64(s.Interval))
-
 			task = &refreshTask{
 				source:   s,
 				fetcher:  r.fetcher,
+				jitterer: newJitterer(s),
 				dispatch: r.dispatch,
 				clock:    r.clock,
-
-				intervalBase:  jitterLo,
-				intervalRange: jitterHi - jitterLo + 1,
 			}
 		)
 
@@ -193,32 +185,10 @@ func (r *refresher) dispatch(event RefreshEvent) {
 type refreshTask struct {
 	source   RefreshSource
 	fetcher  Fetcher
+	jitterer jitterer
+
 	dispatch func(RefreshEvent)
 	clock    chronon.Clock
-
-	// precomputed jitter range
-	intervalBase  int64
-	intervalRange int64
-}
-
-func (rt *refreshTask) computeNextRefresh(meta ContentMeta, err error) (next time.Duration) {
-	switch {
-	case err != nil || meta.TTL <= 0:
-		next = time.Duration(rt.intervalBase + rand.Int63n(rt.intervalRange))
-
-	default:
-		// adjust the jitter window down, so that we always pick a random interval
-		// that is less than or equal to the TTL.
-		base := int64(2.0 * (1.0 - rt.source.Jitter) * float64(meta.TTL))
-		next = time.Duration(rand.Int63n(int64(meta.TTL) - base + 1))
-	}
-
-	// enforce our minimum interval regardless of how the next interval was calculated
-	if next < rt.source.MinInterval {
-		next = rt.source.MinInterval
-	}
-
-	return
 }
 
 func (rt *refreshTask) newKeyMap(keys []Key) (m map[string]Key) {
@@ -295,7 +265,7 @@ func (rt *refreshTask) run(ctx context.Context) {
 		rt.dispatch(event)
 
 		var (
-			next  = rt.computeNextRefresh(prevMeta, err)
+			next  = rt.jitterer.nextInterval(prevMeta, err)
 			timer = rt.clock.NewTimer(next)
 		)
 

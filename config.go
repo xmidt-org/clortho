@@ -28,14 +28,14 @@ import (
 const (
 	// DefaultRefreshInterval is used as the base interval between key refreshes when an
 	// interval couldn't be determined any other way.
-	DefaultRefreshInterval time.Duration = time.Hour * 24
+	DefaultRefreshInterval = time.Hour * 24
 
 	// DefaultRefreshMinInterval is the hard minimum for the base interval between key refreshes
 	// regardless of how the base interval was determined.
-	DefaultRefreshMinInterval time.Duration = time.Minute * 10
+	DefaultRefreshMinInterval = time.Minute * 10
 
 	// DefaultRefreshJitter is the default randomization factor for key refreshes.
-	DefaultRefreshJitter float64 = 0.1
+	DefaultRefreshJitter = 0.1
 )
 
 // RefreshSource describes a single location where keys are retrieved on a schedule.
