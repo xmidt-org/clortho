@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -50,16 +51,16 @@ type RefreshEvent struct {
 
 	// Keys represents the complete set of keys from the URI.  When Err is not nil,
 	// this field will be set to the last known valid set of keys.
-	Keys []Key
+	Keys Keys
 
 	// New are the keys that a brand new with this event.  These keys will be
 	// included in the Keys field.
-	New []Key
+	New Keys
 
 	// Deleted are the keys that are now missing from the refreshed keys.
 	// These keys will not be in the Keys field.  These keys will have been present
 	// in the previous event(s).
-	Deleted []Key
+	Deleted Keys
 }
 
 // RefreshListener is a sink for RefreshEvents.
@@ -92,7 +93,7 @@ type Refresher interface {
 }
 
 // NewRefresher constructs a Refresher using the supplied options.  Without any options,
-// the DefaultLoader() and DefaultParser() are used.
+// a default Loader and Parser are created and used.
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
@@ -288,6 +289,9 @@ func (rt *refreshTask) run(ctx context.Context) {
 			copy(event.Keys, prevKeys)
 		}
 
+		sort.Sort(event.Keys)
+		sort.Sort(event.New)
+		sort.Sort(event.Deleted)
 		rt.dispatch(event)
 
 		var (
