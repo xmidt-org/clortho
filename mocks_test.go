@@ -19,7 +19,6 @@ package clortho
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -89,7 +88,6 @@ type mockRefreshListener struct {
 }
 
 func (m *mockRefreshListener) OnRefreshEvent(event RefreshEvent) {
-	fmt.Printf("OnRefreshEvent: %#v\n", event)
 	m.Called(event)
 }
 

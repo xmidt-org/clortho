@@ -32,12 +32,11 @@ type KeyAccessor interface {
 // KeyRing is a clientside cache of keys.  Implementations are always
 // safe for concurrent access.
 //
-// A KeyRing can consume events from a Refresher and Resolver, which will
+// A KeyRing can consume events from a Refresher, which will
 // update the ring's set of keys.
 type KeyRing interface {
 	KeyAccessor
 	RefreshListener
-	ResolveListener
 
 	// Add allows ad hoc keys to be added to this ring.  Any key that has
 	// no key ID will be skipped.
@@ -109,16 +108,6 @@ func (kr *keyRing) OnRefreshEvent(event RefreshEvent) {
 		keyID := key.KeyID()
 		delete(kr.keys, keyID)
 	}
-}
-
-func (kr *keyRing) OnResolveEvent(event ResolveEvent) {
-	if event.Key == nil {
-		return
-	}
-
-	kr.lock.Lock()
-	kr.keys[event.KeyID] = event.Key
-	kr.lock.Unlock()
 }
 
 func (kr *keyRing) Add(keys ...Key) (n int) {

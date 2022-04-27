@@ -113,21 +113,6 @@ func (suite *RefresherSuite) SetupTest() {
 	suite.Require().Len(suite.set2, 3)
 }
 
-func (suite *RefresherSuite) assertInterval(interval time.Duration, source RefreshSource) {
-	configuredInterval := source.Interval
-	if configuredInterval <= 0 {
-		configuredInterval = DefaultRefreshInterval
-	}
-
-	configuredJitter := source.Jitter
-	if configuredJitter <= 0.0 {
-		configuredJitter = DefaultRefreshJitter
-	}
-
-	// the interval must be within the jitter window
-	suite.InDelta(configuredInterval, interval, configuredJitter*float64(configuredInterval))
-}
-
 func (suite *RefresherSuite) newRefresher(options ...RefresherOption) Refresher {
 	r, err := NewRefresher(options...)
 	suite.Require().NoError(err)
@@ -213,21 +198,33 @@ func (suite *RefresherSuite) testRefresh(source RefreshSource) {
 		Deleted: []Key{suite.set1[1]}, // deleted kid "B"
 	}).Once()
 
-	r.Start(context.Background())
+	suite.Require().NoError(
+		r.Start(context.Background()),
+	)
+
+	suite.ErrorIs(
+		r.Start(context.Background()),
+		ErrRefresherStarted,
+	)
 
 	// fetch the timer after the first request
 	timer := suite.getTimer(timerCh)
-	suite.assertInterval(fc.Until(timer.When()), source)
 
 	// we're expecting (2) more events
 	for i := 0; i < 2; i++ {
 		fc.Set(timer.When())
-
 		timer = suite.getTimer(timerCh)
-		suite.assertInterval(fc.Until(timer.When()), source)
 	}
 
-	r.Stop(context.Background())
+	suite.NoError(
+		r.Stop(context.Background()),
+	)
+
+	suite.ErrorIs(
+		r.Stop(context.Background()),
+		ErrRefresherStopped,
+	)
+
 	f.AssertExpectations(suite.T())
 	listener.AssertExpectations(suite.T())
 }
@@ -237,6 +234,14 @@ func (suite *RefresherSuite) TestRefresh() {
 		suite.testRefresh(RefreshSource{
 			URI: "http://getkeys.com/keys",
 			// take the defaults for interval, jitter, etc
+		})
+	})
+
+	suite.Run("CustomInterval", func() {
+		suite.testRefresh(RefreshSource{
+			URI:      "http://getkeys.com/keys",
+			Interval: 45 * time.Minute,
+			Jitter:   0.15,
 		})
 	})
 }
