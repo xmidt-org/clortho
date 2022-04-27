@@ -71,88 +71,34 @@ type RefreshSource struct {
 	Jitter float64 `json:"jitter" yaml:"jitter"`
 }
 
-// validateAndSetDefaults both (1) validates this source, and (2) returns a copy of this
-// source with certain fields set to the appropriate defaults.
-func (rs RefreshSource) validateAndSetDefaults() (defaulted RefreshSource, err error) {
-	defaulted = rs
-
-	// use the URI to match up errors to the source
-	uri := defaulted.URI
-	if len(uri) == 0 {
-		uri = "missing URI"
+// validate checks that this RefreshSource is valid.
+func (rs RefreshSource) validate() (err error) {
+	if len(rs.URI) == 0 {
 		err = multierr.Append(err, errors.New("A URI is required for each refresh source"))
 	}
 
-	switch {
-	case defaulted.Jitter == 0.0:
-		defaulted.Jitter = DefaultRefreshJitter
-
-	case rs.Jitter < 0.0 || rs.Jitter >= 1.0:
-		err = multierr.Append(
-			err,
-			fmt.Errorf("Invalid refresh jitter for '%s': %f", uri, defaulted.Jitter),
-		)
-	}
-
-	switch {
-	case defaulted.Interval == 0:
-		defaulted.Interval = DefaultRefreshInterval
-
-	case defaulted.Interval < 0:
-		err = multierr.Append(
-			err,
-			fmt.Errorf("Invalid refresh interval for '%s': %s", uri, defaulted.Interval),
-		)
-	}
-
-	switch {
-	case defaulted.MinInterval == 0:
-		defaulted.MinInterval = DefaultRefreshMinInterval
-
-	case defaulted.MinInterval < 0:
-		err = multierr.Append(
-			err,
-			fmt.Errorf("Invalid minimum refresh interval for '%s': %s", uri, defaulted.MinInterval),
-		)
-	}
-
-	if defaulted.MinInterval > defaulted.Interval {
-		err = multierr.Append(
-			err,
-			fmt.Errorf(
-				"Invalid MinInterval for '%s': MinInterval [%s] cannot be larger than Interval [%s]",
-				uri, defaulted.MinInterval, defaulted.Interval,
-			),
-		)
-	}
-
 	return
 }
 
-// validateAndSetDefaults returns a slice containing a copy of each source which has been validated
-// and had any necessary defaults applied.  A composite error containing all validation errors
-// is returned, or nil to indicate everything was valid.
-func validateAndSetDefaults(in ...RefreshSource) (out []RefreshSource, err error) {
-	out = make([]RefreshSource, 0, len(out))
-	duplicates := make(map[string]RefreshSource, len(out))
+// validateRefreshSources validates a sequence of sources.
+func validateRefreshSources(in ...RefreshSource) (err error) {
+	duplicates := make(map[string]RefreshSource, len(in))
 	for _, s := range in {
-		defaulted, validationErr := s.validateAndSetDefaults()
-		err = multierr.Append(err, validationErr)
+		err = multierr.Append(err, s.validate())
 
-		if _, ok := duplicates[defaulted.URI]; ok {
-			err = multierr.Append(err, fmt.Errorf("Duplicate refresh source URI: '%s'", defaulted.URI))
+		if _, ok := duplicates[s.URI]; ok {
+			err = multierr.Append(err, fmt.Errorf("Duplicate refresh source URI: '%s'", s.URI))
 			continue
 		}
 
-		duplicates[defaulted.URI] = defaulted
-		out = append(out, defaulted)
+		duplicates[s.URI] = s
 	}
 
 	return
 }
 
-// FetchConfig configures how to fetch individual keys on demand.
-type FetchConfig struct {
+// ResolveConfig configures how to fetch individual keys on demand.
+type ResolveConfig struct {
 	// Template is a URI template used to fetch keys.  This template may
 	// use a single parameter named keyID, e.g. http://keys.com/{keyID}.
 	Template string `json:"template" yaml:"template"`
@@ -175,9 +121,9 @@ type RefreshConfig struct {
 
 // Config configures clortho from (possibly) externally unmarshaled locations.
 type Config struct {
-	// Fetch is the subset of configuration that establishes how individual
-	// keys will be fetched on demand.
-	Fetch FetchConfig `json:"fetch" yaml:"fetch"`
+	// Resolve is the subset of configuration that establishes how individual
+	// keys will be resolved (or, fetched) on demand.
+	Resolve ResolveConfig `json:"resolve" yaml:"resolve"`
 
 	// Refresh is the subset of configuration that configures how keys are refreshed
 	// in the background.
