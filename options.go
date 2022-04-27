@@ -124,7 +124,7 @@ func WithKeyIDTemplate(t string) ResolverOption {
 	return resolverOptionFunc(func(r *resolver) error {
 		e, err := NewExpander(t)
 		if err == nil {
-			r.keyIDExpander = e
+			err = WithKeyIDExpander(e).applyToResolver(r)
 		}
 
 		return err
