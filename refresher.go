@@ -20,9 +20,8 @@ package clortho
 import (
 	"context"
 	"errors"
-	"math/rand"
+	"sort"
 	"sync"
-	"time"
 
 	"github.com/xmidt-org/chronon"
 	"go.uber.org/multierr"
@@ -50,16 +49,16 @@ type RefreshEvent struct {
 
 	// Keys represents the complete set of keys from the URI.  When Err is not nil,
 	// this field will be set to the last known valid set of keys.
-	Keys []Key
+	Keys Keys
 
 	// New are the keys that a brand new with this event.  These keys will be
 	// included in the Keys field.
-	New []Key
+	New Keys
 
 	// Deleted are the keys that are now missing from the refreshed keys.
 	// These keys will not be in the Keys field.  These keys will have been present
 	// in the previous event(s).
-	Deleted []Key
+	Deleted Keys
 }
 
 // RefreshListener is a sink for RefreshEvents.
@@ -92,7 +91,7 @@ type Refresher interface {
 }
 
 // NewRefresher constructs a Refresher using the supplied options.  Without any options,
-// the DefaultLoader() and DefaultParser() are used.
+// a default Loader and Parser are created and used.
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
@@ -139,18 +138,12 @@ func (r *refresher) Start(_ context.Context) error {
 	taskCtx, taskCancel := context.WithCancel(context.Background())
 	for _, s := range r.sources {
 		var (
-			// precompute the jitter range for the configured interval
-			jitterLo = int64((1.0 - s.Jitter) * float64(s.Interval))
-			jitterHi = int64((1.0 + s.Jitter) * float64(s.Interval))
-
 			task = &refreshTask{
 				source:   s,
 				fetcher:  r.fetcher,
+				jitterer: newJitterer(s),
 				dispatch: r.dispatch,
 				clock:    r.clock,
-
-				intervalBase:  jitterLo,
-				intervalRange: jitterHi - jitterLo + 1,
 			}
 		)
 
@@ -192,35 +185,13 @@ func (r *refresher) dispatch(event RefreshEvent) {
 type refreshTask struct {
 	source   RefreshSource
 	fetcher  Fetcher
+	jitterer jitterer
+
 	dispatch func(RefreshEvent)
 	clock    chronon.Clock
-
-	// precomputed jitter range
-	intervalBase  int64
-	intervalRange int64
 }
 
-func (rt *refreshTask) computeNextRefresh(meta ContentMeta, err error) (next time.Duration) {
-	switch {
-	case err != nil || meta.TTL <= 0:
-		next = time.Duration(rt.intervalBase + rand.Int63n(rt.intervalRange))
-
-	default:
-		// adjust the jitter window down, so that we always pick a random interval
-		// that is less than or equal to the TTL.
-		base := int64(2.0 * (1.0 - rt.source.Jitter) * float64(meta.TTL))
-		next = time.Duration(rand.Int63n(int64(meta.TTL) - base + 1))
-	}
-
-	// enforce our minimum interval regardless of how the next interval was calculated
-	if next < rt.source.MinInterval {
-		next = rt.source.MinInterval
-	}
-
-	return
-}
-
-func (rt *refreshTask) newKeyMap(keys []Key) (m map[string]Key, err error) {
+func (rt *refreshTask) newKeyMap(keys []Key) (m map[string]Key) {
 	m = make(map[string]Key, len(keys))
 	for _, k := range keys {
 		m[k.KeyID()] = k
@@ -269,8 +240,7 @@ func (rt *refreshTask) run(ctx context.Context) {
 			return
 
 		case err == nil:
-			// TODO: handle the error somehow
-			nextKeyMap, _ := rt.newKeyMap(nextKeys)
+			nextKeyMap := rt.newKeyMap(nextKeys)
 
 			event.Keys = make([]Key, len(nextKeys))
 			copy(event.Keys, nextKeys)
@@ -289,10 +259,13 @@ func (rt *refreshTask) run(ctx context.Context) {
 			copy(event.Keys, prevKeys)
 		}
 
+		sort.Sort(event.Keys)
+		sort.Sort(event.New)
+		sort.Sort(event.Deleted)
 		rt.dispatch(event)
 
 		var (
-			next  = rt.computeNextRefresh(prevMeta, err)
+			next  = rt.jitterer.nextInterval(prevMeta, err)
 			timer = rt.clock.NewTimer(next)
 		)
 

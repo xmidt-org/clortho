@@ -80,6 +80,7 @@ func (k *key) KeyType() string          { return k.keyType }
 func (k *key) KeyUsage() string         { return k.keyUsage }
 func (k *key) Raw() interface{}         { return k.raw }
 func (k *key) Public() crypto.PublicKey { return k.public }
+func (k *key) String() string           { return k.keyID }
 
 func convertJWKKey(jk jwk.Key) (Key, error) {
 	k := &key{
