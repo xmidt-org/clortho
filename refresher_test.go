@@ -20,9 +20,11 @@ package clortho
 import (
 	"context"
 	"errors"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/xmidt-org/chronon"
 )
@@ -244,6 +246,51 @@ func (suite *RefresherSuite) TestRefresh() {
 			Jitter:   0.15,
 		})
 	})
+}
+
+func (suite *RefresherSuite) TestStopDuringFetch() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newRefresher(
+			WithFetcher(f),
+			WithSources(RefreshSource{URI: "http://getkeys.com/keys"}),
+		)
+
+		listener     = new(mockRefreshListener)
+		fetchReady   = make(chan struct{})
+		fetchBarrier = make(chan struct{})
+		matchContext = func(ctx context.Context) bool {
+			return suite.NotEqual(context.Background(), ctx)
+		}
+	)
+
+	f.ExpectFetchCtx(matchContext, "http://getkeys.com/keys", ContentMeta{}).
+		Return(suite.set1, ContentMeta{Format: MediaTypeJWKSet}, error(nil)).
+		Run(func(mock.Arguments) {
+			close(fetchReady)
+			<-fetchBarrier
+		}).
+		Once()
+
+	suite.Require().NoError(
+		r.Start(context.Background()),
+	)
+
+	select {
+	case <-time.After(2 * time.Second):
+		suite.Fail("Fetch was not called")
+	case <-fetchReady:
+		// passing
+	}
+
+	suite.Require().NoError(
+		r.Stop(context.Background()),
+	)
+
+	close(fetchBarrier)
+	runtime.Gosched()
+	f.AssertExpectations(suite.T())
+	listener.AssertExpectations(suite.T())
 }
 
 func TestRefresher(t *testing.T) {
