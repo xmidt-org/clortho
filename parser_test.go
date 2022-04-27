@@ -19,6 +19,7 @@ package clortho
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
 	"errors"
 	"testing"
@@ -107,7 +108,7 @@ aAdfGgjK2jZ7kXV5rnnxtfINVtb6aILglQ==
     "n": "grvEfHfqjwf-sJX-rEsJQV2LK1ok8InBvRDpR2BJGmDt_NCozqqMYhbRZaAJuqzYBav1m86VaKz3ZkGqYVI16tq4cB_csn9NYqD3yHhx3HdrJqt2AZZihCJCghHwTff6kclvpUIjvmYV92VJAGw_rlmbfBt7h4U5pkeAZ2RgsPVNTi8RaO5j9ogBuubFJS9i8nZ4qPG3e7nRenjP4VjRWgsvcGkHu6r5Tf-EWMSm8huYCm3Gxi-6krLAKC0e0YUkkAcB5oToZmmBl5hpsp2RD7P71Dv8u76NuDXWO6yDDty6hMoJjYzi2SCPHKgVO6hXu7MmSB0XvoGMgwZYR28cEw"
 }`
 
-	// jwkSet is a JWK set containing the singleJWK key and an EC key
+	// jwkSet is a JWK set containing the singleJWK key followed by a key of each type, both private and public
 	jwkSet = `{
     "keys": [
         {
@@ -122,14 +123,39 @@ aAdfGgjK2jZ7kXV5rnnxtfINVtb6aILglQ==
             "dq": "NE5Xen4r31ltaOIE1iyMT-_YRWWHLqEPKT7_6oznIC_3NKC2R7qndeOGJc8aQT3WeHBk1lx9e5YJ1cYuRs4gqBFFRFhmsbLF80ZiGGdmorMX42Z3ccPB_kJibFChlsOEX4mQECFE06xEYRXZ7kNAh7mf66OCuEQA5H8dxqXavyU",
             "n": "grvEfHfqjwf-sJX-rEsJQV2LK1ok8InBvRDpR2BJGmDt_NCozqqMYhbRZaAJuqzYBav1m86VaKz3ZkGqYVI16tq4cB_csn9NYqD3yHhx3HdrJqt2AZZihCJCghHwTff6kclvpUIjvmYV92VJAGw_rlmbfBt7h4U5pkeAZ2RgsPVNTi8RaO5j9ogBuubFJS9i8nZ4qPG3e7nRenjP4VjRWgsvcGkHu6r5Tf-EWMSm8huYCm3Gxi-6krLAKC0e0YUkkAcB5oToZmmBl5hpsp2RD7P71Dv8u76NuDXWO6yDDty6hMoJjYzi2SCPHKgVO6hXu7MmSB0XvoGMgwZYR28cEw"
         },
+        {
+            "kty": "RSA",
+            "e": "AQAB",
+            "n": "ieUrPhya0uxSMGBJ4ycGoLg9N-Wp3PK5uk30eoBsDmpOJMOr_5yLfplzv681dP9EHEhB_AMl5WgvhnNb7zLwDOZ13egYLrn6u6XOhIkGapabaaqftQ9MaNBDdlIJK-YNKDkNfU4bpk50qIpg2KQ1YJpC4YhWAcXs_rtOoNxqDTn9k4Vqp_EP89xhkLaxJqHG5UKpY7wLSftisuaLi0NdSFgF-n2DMPeOjiRmU_bGjknLCHuAlNeIP5a3XlxXl49VotuTnf9Vfb12YnOBecWbE30vi8J8JYXEXEV1fEHe7dBoGhzBjtmvDeYt00eNrBSHmKGFzlxyk_R7SsDdbQ1UHQ"
+        },
 		{
-		  "kid": "second",
   		  "kty": "EC",
 		  "d": "CMO2iZHDcDwkZvDd6IDTuxumYy4Fy6fOjkgL9IAtfrv3uuOHhAt5Qc0Mk8Ps53ss",
 		  "crv": "P-384",
 		  "x": "TYgJflJcwSRp1Qzx8zlz1rrt3t1LdWxfZ4Ticpa5Oa0IJCLXQZYcPqeBoT7lZBgO",
 		  "y": "96EaX1zHA8aQi6cSledZfRJyIgVDekgw4J3mz_MrAON2MQTYWc3BpqqJ8gWrNMmr"
-		}
+		},
+        {
+            "kty": "EC",
+            "crv": "P-384",
+            "x": "D5phDK1IM8GKR6RPVZKIQD5KE_FYxweV5zSKzUYxS8zf-cLbX8IBFWKOrMI_KsGY",
+            "y": "JkxVyHR4b8A84WRIHLVHNkT8B0CJVtvlJRVBrTLSi4SsncyY98TADDaf-dMbsYoo"
+        },
+        {
+            "kty": "oct",
+            "k": "CJbqlYu3h-UlCIeGYu66Fv8AJvedOrqBFC2Qt4fASV4tlDUXPVv8LoH9A_AHZwEO0ag4DVBs7hOO6_l-OWTk8PWCQHSX4LeXTEPDzdxNucps-qY25gEBapnw4SqC6HgHM9e-zXgEep1Hx5VjNcE3RMs0-FBCTX20OypYPoIMX8HTTwlcGZrwXlFsHPlz1zIzuxOh9qrs9FyILOHbPCLck7AI4Gead5W97RTPFp0uvw39gbZYh-cn21brQgzX278sOYOavqFsZdwFznI050Rc1iCF0_b_Nyd-9VUpWd7GhbGUku-Z7bmmzM7i_Xlhms44sQ0ncCvJY1_2qJ-m_yAkEQ"
+        },
+        {
+            "kty": "OKP",
+            "d": "kK65SnMX5iL1j8DkVn8EqRrvrlcQdSFFVOed5MCf2Fk",
+            "crv": "Ed25519",
+            "x": "US0-0BVHsGkVvODXrAhLLk9AfzwlYvt4Xk6j-U0dsJc"
+        },
+        {
+            "kty": "OKP",
+            "crv": "Ed25519",
+            "x": "phvHkcNnoiXAWLoMDrkJxM1-B4Ov26uvU29lRTpe1QI"
+        }
     ]
 }`
 )
@@ -235,19 +261,58 @@ func (suite *ParserSuite) testJWKSet(format string) {
 	p := suite.newParser()
 	keys, err := p.Parse(format, []byte(jwkSet))
 	suite.Require().NoError(err)
-	suite.Require().Len(keys, 2)
+	suite.Require().Len(keys, 7)
 
 	k := keys[0]
 	suite.Require().NotNil(k)
 	suite.Equal("first", k.KeyID())
 	suite.Empty(k.KeyUsage())
-	suite.assertRSAKey(k)
+	suite.Equal(string(jwa.RSA), k.KeyType())
+	suite.IsType((*rsa.PrivateKey)(nil), k.Raw())
+	suite.IsType((*rsa.PublicKey)(nil), k.Public())
 
 	k = keys[1]
 	suite.Require().NotNil(k)
-	suite.Equal("second", k.KeyID())
 	suite.Empty(k.KeyUsage())
-	suite.assertECKey(k)
+	suite.Equal(string(jwa.RSA), k.KeyType())
+	suite.IsType((*rsa.PublicKey)(nil), k.Raw())
+	suite.IsType((*rsa.PublicKey)(nil), k.Public())
+
+	k = keys[2]
+	suite.Require().NotNil(k)
+	suite.Empty(k.KeyUsage())
+	suite.Equal(string(jwa.EC), k.KeyType())
+	suite.IsType((*ecdsa.PrivateKey)(nil), k.Raw())
+	suite.IsType((*ecdsa.PublicKey)(nil), k.Public())
+
+	k = keys[3]
+	suite.Require().NotNil(k)
+	suite.Empty(k.KeyUsage())
+	suite.Equal(string(jwa.EC), k.KeyType())
+	suite.IsType((*ecdsa.PublicKey)(nil), k.Raw())
+	suite.IsType((*ecdsa.PublicKey)(nil), k.Public())
+
+	k = keys[4]
+	suite.Require().NotNil(k)
+	suite.Empty(k.KeyUsage())
+	suite.Equal(string(jwa.OctetSeq), k.KeyType())
+	suite.IsType(([]byte)(nil), k.Raw())
+	suite.IsType(([]byte)(nil), k.Public())
+	suite.Equal(k.Raw(), k.Public())
+
+	k = keys[5]
+	suite.Require().NotNil(k)
+	suite.Empty(k.KeyUsage())
+	suite.Equal(string(jwa.OKP), k.KeyType())
+	suite.IsType((ed25519.PrivateKey)(nil), k.Raw())
+	suite.IsType((ed25519.PublicKey)(nil), k.Public())
+
+	k = keys[6]
+	suite.Require().NotNil(k)
+	suite.Empty(k.KeyUsage())
+	suite.Equal(string(jwa.OKP), k.KeyType())
+	suite.IsType((ed25519.PublicKey)(nil), k.Raw())
+	suite.IsType((ed25519.PublicKey)(nil), k.Public())
 }
 
 func (suite *ParserSuite) testJWKSetInvalid(format string) {
