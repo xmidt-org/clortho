@@ -43,21 +43,27 @@ type RefreshEvent struct {
 
 	// Err is the error that occurred while trying to interact with the URI.
 	// This field can be nil to indicate no error.  When this field is non-nil,
-	// the various keys fields will be populated with the last valid set of keys
-	// from the URI.
+	// the Keys field will be populated with the last known valid set of keys
+	// from the given URI.
 	Err error
 
 	// Keys represents the complete set of keys from the URI.  When Err is not nil,
 	// this field will be set to the last known valid set of keys.
+	//
+	// This field will be sorted by KeyID.
 	Keys Keys
 
 	// New are the keys that a brand new with this event.  These keys will be
 	// included in the Keys field.
+	//
+	// This field will be sorted by KeyID.
 	New Keys
 
 	// Deleted are the keys that are now missing from the refreshed keys.
 	// These keys will not be in the Keys field.  These keys will have been present
 	// in the previous event(s).
+	//
+	// This field will be sorted by KeyID.
 	Deleted Keys
 }
 

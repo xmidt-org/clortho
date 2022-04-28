@@ -41,7 +41,8 @@ const (
 // RefreshSource describes a single location where keys are retrieved on a schedule.
 type RefreshSource struct {
 	// URI is the location where keys are served.  By default, clortho supports
-	// file://, http://, and https:// URIs.
+	// file://, http://, and https:// URIs, as well as standard file system paths
+	// such as /etc/foo/bar.jwk.
 	//
 	// This field is required and has no default.
 	URI string `json:"uri" yaml:"uri"`
@@ -50,31 +51,29 @@ type RefreshSource struct {
 	// is used when the source URI doesn't specify any sort of time-to-live or expiry.
 	// For example, if an http source doesn't specify a Cache-Control header, this value is used.
 	//
-	// If this field is unset, DefaultRefreshInterval is used.  If this field is negative,
-	// an error is raised.
+	// If this field is not positive, DefaultRefreshInterval is used.
 	Interval time.Duration `json:"interval" yaml:"interval"`
 
 	// MinInterval specifies the absolute minimum time between key refreshes from this source.
 	// Regardless of HTTP headers, the Interval field, etc, key refreshes will not occur more
-	// faster than this field indicates.
+	// often than this field indicates.
 	//
-	// If this value is unset, DefaultRefreshMinInterval is used.  If this field is negative or larger
-	// than Interval, an error is raised.
+	// If this value is not positive, DefaultRefreshMinInterval is used.
 	MinInterval time.Duration `json:"minInterval" yaml:"minInterval"`
 
 	// Jitter is the randomization factor applied to the interval between refreshes.  No matter how
 	// the interval is determined (e.g. Cache-Control, Interval field, etc), a random value between
 	// [1-Jitter,1+Jitter]*interval is used as the actual time before the next attempted refresh.
 	//
-	// If this field is unset, DefaultRefreshJitter is used.  If this field is greater than or equal
-	// to 1.0 or is negative, an error is raised.
+	// Valid values are between 0.0 and 1.0, exclusive.  If this value is outside that range,
+	// including being unset, DefaultRefreshJitter is used instead.
 	Jitter float64 `json:"jitter" yaml:"jitter"`
 }
 
 // validate checks that this RefreshSource is valid.
 func (rs RefreshSource) validate() (err error) {
 	if len(rs.URI) == 0 {
-		err = multierr.Append(err, errors.New("A URI is required for each refresh source"))
+		err = errors.New("A URI is required for each refresh source")
 	}
 
 	return
@@ -125,7 +124,7 @@ type Config struct {
 	// keys will be resolved (or, fetched) on demand.
 	Resolve ResolveConfig `json:"resolve" yaml:"resolve"`
 
-	// Refresh is the subset of configuration that configures how keys are refreshed
-	// in the background.
+	// Refresh is the subset of configuration that configures how keys are
+	// refreshed asynchronously.
 	Refresh RefreshConfig `json:"refresh" yaml:"refresh"`
 }

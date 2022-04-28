@@ -166,10 +166,19 @@ func (ls *loaders) LoadContent(ctx context.Context, location string, meta Conten
 	}
 }
 
+// HTTPLoader is a Loader strategy for obtaining content from HTTP servers.
 type HTTPLoader struct {
-	Client   HTTPClient
+	// Client is the HTTP client used to transact with HTTP servers.
+	// If unset, http.DefaultClient is used.
+	Client HTTPClient
+
+	// Encoders holds an optional slice of HTTPEncoder instances that are used
+	// to modify requests prior to sending them to the Client.
 	Encoders []HTTPEncoder
-	Timeout  time.Duration
+
+	// Timeout is an optional timeout for each HTTP operation.  If unset,
+	// no timeout is used.
+	Timeout time.Duration
 }
 
 func nopCancel() {}
@@ -289,7 +298,14 @@ func (hl HTTPLoader) LoadContent(ctx context.Context, location string, meta Cont
 	return data, hl.newMeta(response), nil
 }
 
+// FileLoader is a Loader implementation that reads content from a file system.
+// All location paths are relative to a supplied root.
 type FileLoader struct {
+	// Root is the relative root against which all location paths are resolved.
+	// This field is required.
+	//
+	// By default, the Loader create via NewLoader uses os.DirFS("/") for this
+	// field.
 	Root fs.FS
 }
 

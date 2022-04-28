@@ -31,7 +31,8 @@ func (lof loaderOptionFunc) applyToLoaders(ls *loaders) error { return lof(ls) }
 // WithSchemes registers a loader as handling one or more URI schemes.  Use this
 // to add custom schemes or to override one of the schemes a loader handles by default.
 //
-// By default, a Loader handles the file, http, and https schemes.
+// By default, a Loader created with NewLoader handles the file, http, and https schemes,
+// as well as file paths without a scheme.
 func WithSchemes(l Loader, schemes ...string) LoaderOption {
 	return loaderOptionFunc(func(ls *loaders) error {
 		for _, s := range schemes {
@@ -75,6 +76,8 @@ func (fof fetcherOptionFunc) applyToFetcher(f *fetcher) error {
 	return fof(f)
 }
 
+// WithLoader defines the Loader strategy for a Fetcher.  By default,
+// a Fetcher uses a Loader created with no options.
 func WithLoader(l Loader) FetcherOption {
 	return fetcherOptionFunc(func(f *fetcher) error {
 		f.loader = l
@@ -82,6 +85,8 @@ func WithLoader(l Loader) FetcherOption {
 	})
 }
 
+// WithParser defines the Parser strategy for a Fetcher.  By default,
+// a Fetcher uses a Parser created with no options.
 func WithParser(p Parser) FetcherOption {
 	return fetcherOptionFunc(func(f *fetcher) error {
 		f.parser = p
@@ -110,7 +115,8 @@ func (rof resolverOptionFunc) applyToResolver(r *resolver) error {
 }
 
 // WithKeyIDExpander establishes the Expander strategy used for resolving
-// individual keys.
+// individual keys.  Callers may use this option to associate a custom
+// Expander with a Resolver.
 func WithKeyIDExpander(e Expander) ResolverOption {
 	return resolverOptionFunc(func(r *resolver) error {
 		r.keyIDExpander = e
@@ -151,6 +157,9 @@ func (rof refresherOptionFunc) applyToRefresher(r *refresher) error {
 	return rof(r)
 }
 
+// WithSources associates external sources of keys with a Refresher.
+// This option is cumulative:  all sources from each call to WithSources
+// will be added to the configured Refresher.
 func WithSources(sources ...RefreshSource) RefresherOption {
 	return refresherOptionFunc(func(r *refresher) error {
 		r.sources = append(r.sources, sources...)
