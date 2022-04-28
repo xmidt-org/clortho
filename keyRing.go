@@ -25,11 +25,11 @@ type KeyAccessor interface {
 	// If there is no such key, the second return is false.
 	Get(keyID string) (Key, bool)
 
-	// Len returns the number of keys currently in this ring.
+	// Len returns the number of keys currently in this collection.
 	Len() int
 }
 
-// KeyRing is a clientside cache of keys.  Implementations are always
+// KeyRing is a client-side cache of keys.  Implementations are always
 // safe for concurrent access.
 //
 // A KeyRing can consume events from a Refresher, which will
