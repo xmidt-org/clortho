@@ -122,8 +122,17 @@ type pendingResolverRequest struct {
 	value atomic.Value
 }
 
+// pendingResolverRequests holds the key requests that are in-flight.  Map keys
+// are key IDs.  This type is not itself safe for concurrent access.
 type pendingResolverRequests map[string]*pendingResolverRequest
 
+// requestFor returns a pending request for a keyID.
+//
+// If wait is true, this is an existing request that is already in-flight within
+// another goroutine.  In this case, the caller should wait on the request's done channel.
+//
+// If wait is false, this is a new request and the caller is responsible for executing
+// the fetch of the key.
 func (prr pendingResolverRequests) requestFor(keyID string) (r *pendingResolverRequest, wait bool) {
 	r, wait = prr[keyID]
 	if !wait {
@@ -138,6 +147,8 @@ func (prr pendingResolverRequests) requestFor(keyID string) (r *pendingResolverR
 	return
 }
 
+// cleanup removes the pending request.  This method needs to be guarded
+// by an enclosing lock.
 func (prr pendingResolverRequests) cleanup(request *pendingResolverRequest) {
 	delete(prr, request.keyID)
 	close(request.done)
