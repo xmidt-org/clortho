@@ -19,9 +19,31 @@ package clorthozap
 
 import (
 	"github.com/xmidt-org/clortho"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+// ListenerOption is a configurable option passed to NewListener that
+// can tailor the created Listener.
+type ListenerOption interface {
+	applyToListener(*Listener) error
+}
+
+type listenerOptionFunc func(*Listener) error
+
+func (lof listenerOptionFunc) applyToListener(l *Listener) error {
+	return lof(l)
+}
+
+// WithLogger establishes the zap Logger instance that receives output.
+// By default, a Listener will use the default logger returned by zap.L().
+func WithLogger(logger *zap.Logger) ListenerOption {
+	return listenerOptionFunc(func(l *Listener) error {
+		l.logger = logger
+		return nil
+	})
+}
 
 // Listener is both a clortho.RefreshListener and a clortho.ResolveListener
 // that logs information about events via a supplied zap logger.
@@ -33,12 +55,24 @@ var _ clortho.RefreshListener = (*Listener)(nil)
 var _ clortho.ResolveListener = (*Listener)(nil)
 
 // NewListener constructs a *Listener that outputs to the supplied logger.
-func NewListener(l *zap.Logger) *Listener {
-	return &Listener{
-		logger: l,
+func NewListener(options ...ListenerOption) (l *Listener, err error) {
+	l = &Listener{
+		logger: zap.L(),
 	}
+
+	for _, o := range options {
+		err = multierr.Append(err, o.applyToListener(l))
+	}
+
+	if err != nil {
+		l = nil
+	}
+
+	return
 }
 
+// OnRefreshEvent outputs structured logging about the event to the logger
+// established via WithLogger when this listener was created.
 func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 	level := zapcore.InfoLevel
 	if event.Err != nil {
@@ -73,6 +107,8 @@ func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 	)
 }
 
+// OnResolveEvent outputs structured logging about the event to the logger
+// established via WithLogger when this listener was created.
 func (l *Listener) OnResolveEvent(event clortho.ResolveEvent) {
 	level := zapcore.InfoLevel
 	if event.Err != nil {
