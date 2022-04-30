@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"github.com/xmidt-org/clortho"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -46,7 +47,45 @@ func (suite *ListenerSuite) newTestLogger(level zapcore.Level) (*zap.Logger, *by
 	), b
 }
 
+func (suite *ListenerSuite) newListener(options ...ListenerOption) *Listener {
+	listener, err := NewListener(options...)
+	suite.Require().NoError(err)
+	suite.Require().NotNil(listener)
+	return listener
+}
+
+func (suite *ListenerSuite) newKeys(keyIDs ...string) []Key {
+}
+
+func (suite *ListenerSuite) testOnRefreshEvent(event clortho.RefreshEvent, level zapcore.Level) {
+	var (
+		logger, output = suite.newTestLogger(level)
+		listener       = suite.newListener(WithLogger(logger))
+	)
+
+	listener.OnRefreshEvent(event)
+	suite.NotEmpty(output.Bytes())
+}
+
 func (suite *ListenerSuite) TestOnRefreshEvent() {
+	testCases := []struct {
+		description string
+		event       RefreshEvent
+		level       zapcore.Level
+	}{
+		{
+			description: "just keys",
+			event: RefreshEvent{
+				URI: "http://getkeys.com",
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		suite.Run(testCase.description, func() {
+			suite.testOnRefreshEvent(testCase.event, testCase.level)
+		})
+	}
 }
 
 func TestListener(t *testing.T) {
