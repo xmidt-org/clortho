@@ -40,6 +40,40 @@ func (suite *KeysSuite) TestSwap() {
 	suite.Equal("A", keys[1].KeyID())
 }
 
+func (suite *KeysSuite) TestAppendKeyIDs() {
+	suite.Run("ToNil", func() {
+		keyIDs := Keys{
+			&key{keyID: "A"},
+			&key{keyID: "B"},
+		}.AppendKeyIDs(nil)
+
+		suite.Equal([]string{"A", "B"}, keyIDs)
+	})
+
+	suite.Run("ToEmpty", func() {
+		keyIDs := Keys{
+			&key{keyID: "A"},
+			&key{keyID: "B"},
+		}.AppendKeyIDs([]string{})
+
+		suite.Equal([]string{"A", "B"}, keyIDs)
+	})
+
+	suite.Run("ToExisting", func() {
+		keyIDs := Keys{
+			&key{keyID: "A"},
+			&key{keyID: "B"},
+		}.AppendKeyIDs([]string{"1", "2"})
+
+		suite.Equal([]string{"1", "2", "A", "B"}, keyIDs)
+	})
+
+	suite.Run("FromNil", func() {
+		keyIDs := Keys{}.AppendKeyIDs(nil)
+		suite.Empty(keyIDs)
+	})
+}
+
 func TestKeys(t *testing.T) {
 	suite.Run(t, new(KeysSuite))
 }
