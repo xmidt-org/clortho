@@ -56,12 +56,14 @@ var _ clortho.ResolveListener = (*Listener)(nil)
 
 // NewListener constructs a *Listener that outputs to the supplied logger.
 func NewListener(options ...ListenerOption) (l *Listener, err error) {
-	l = &Listener{
-		logger: zap.L(),
-	}
+	l = &Listener{}
 
 	for _, o := range options {
 		err = multierr.Append(err, o.applyToListener(l))
+	}
+
+	if l.logger == nil {
+		l.logger = zap.L()
 	}
 
 	if err != nil {
@@ -86,17 +88,9 @@ func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 
 	// save a couple of allocations by using one big slice for key IDs
 	keyIDs := make([]string, 0, event.Keys.Len()+event.New.Len()+event.Deleted.Len())
-	for _, k := range event.Keys {
-		keyIDs = append(keyIDs, k.KeyID())
-	}
-
-	for _, k := range event.New {
-		keyIDs = append(keyIDs, k.KeyID())
-	}
-
-	for _, k := range event.Deleted {
-		keyIDs = append(keyIDs, k.KeyID())
-	}
+	keyIDs = event.Keys.AppendKeyIDs(keyIDs)
+	keyIDs = event.New.AppendKeyIDs(keyIDs)
+	keyIDs = event.Deleted.AppendKeyIDs(keyIDs)
 
 	ce.Write(
 		zap.String("uri", event.URI),

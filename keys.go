@@ -22,6 +22,17 @@ package clortho
 // that have a keyID.
 type Keys []Key
 
+// AppendKeyIDs appends the key Id of each key to the supplied slice,
+// then returns the result.  It is valid to pass this method a
+// nil or empty slice.
+func (ks Keys) AppendKeyIDs(in []string) []string {
+	for _, k := range ks {
+		in = append(in, k.KeyID())
+	}
+
+	return in
+}
+
 // Len returns the count of Key instances in this collection.
 func (ks Keys) Len() int {
 	return len(ks)
