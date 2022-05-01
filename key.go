@@ -23,7 +23,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 
-	"github.com/lestrrat-go/jwx/jwk"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"go.uber.org/multierr"
 )
 
@@ -136,7 +136,7 @@ func appendJWKKey(jk jwk.Key, keys []Key) ([]Key, error) {
 func appendJWKSet(js jwk.Set, keys []Key) ([]Key, error) {
 	var err error
 	for i := 0; i < js.Len(); i++ {
-		jk, _ := js.Get(i)
+		jk, _ := js.Key(i)
 		var keyErr error
 		keys, keyErr = appendJWKKey(jk, keys)
 		err = multierr.Append(err, keyErr)
