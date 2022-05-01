@@ -101,6 +101,17 @@ const (
 }`
 )
 
+// errorListenerOption is a ListenerOption that returns an error.
+// This type is necessary because we currently don't have an option
+// that we can test NewListener when it returns an error.
+type errorListenerOption struct {
+	expectedError error
+}
+
+func (elo errorListenerOption) applyToListener(l *Listener) error {
+	return elo.expectedError
+}
+
 type ListenerSuite struct {
 	suite.Suite
 
@@ -276,6 +287,16 @@ func (suite *ListenerSuite) TestDefault() {
 	listener, err := NewListener()
 	suite.Require().NoError(err)
 	suite.NotNil(listener.logger)
+}
+
+func (suite *ListenerSuite) TestError() {
+	var (
+		expectedError = errors.New("expected")
+		listener, err = NewListener(errorListenerOption{expectedError: expectedError})
+	)
+
+	suite.Nil(listener)
+	suite.ErrorIs(err, expectedError)
 }
 
 func (suite *ListenerSuite) TestOnRefreshEvent() {
