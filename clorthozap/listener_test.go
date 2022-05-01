@@ -149,6 +149,20 @@ func (suite *ListenerSuite) assertRefreshEntry(b *bytes.Buffer, expectedEvent cl
 	}
 }
 
+func (suite *ListenerSuite) assertResolveEntry(b *bytes.Buffer, expectedEvent clortho.ResolveEvent, expectedLevel zapcore.Level) {
+	m := suite.unmarshalEntry(b)
+
+	suite.Equal(expectedEvent.URI, m["uri"])
+	suite.Equal(expectedEvent.KeyID, m["keyID"])
+	suite.Equal(expectedLevel.String(), m["level"])
+
+	if expectedEvent.Err != nil {
+		suite.Equal(expectedEvent.Err.Error(), m["error"])
+	} else {
+		suite.Nil(m["error"])
+	}
+}
+
 // newTestLogger creates a logger with the given level enabled and standard log message keys.
 // The returned *bytes.Buffer can be used to examine log output.
 func (suite *ListenerSuite) newTestLogger(level zapcore.Level) (*zap.Logger, *bytes.Buffer) {
@@ -258,16 +272,73 @@ func (suite *ListenerSuite) testOnRefreshEventDisabled() {
 	suite.Empty(output.Bytes())
 }
 
-func (suite *ListenerSuite) TestOnRefreshEvent() {
-	suite.Run("Default", func() {
-		listener, err := NewListener()
-		suite.Require().NoError(err)
-		suite.NotNil(listener.logger)
-	})
+func (suite *ListenerSuite) TestDefault() {
+	listener, err := NewListener()
+	suite.Require().NoError(err)
+	suite.NotNil(listener.logger)
+}
 
+func (suite *ListenerSuite) TestOnRefreshEvent() {
 	suite.Run("NoError", suite.testOnRefreshEventNoError)
 	suite.Run("Error", suite.testOnRefreshEventError)
 	suite.Run("Disabled", suite.testOnRefreshEventDisabled)
+}
+
+func (suite *ListenerSuite) testOnResolveEventNoError() {
+	var (
+		logger, output = suite.newTestLogger(zapcore.InfoLevel)
+		listener       = suite.newListener(WithLogger(logger))
+
+		event = clortho.ResolveEvent{
+			URI:   "https://getkeys.com/foo",
+			KeyID: "foo",
+			// NOTE: we don't use the Key field for logging
+		}
+	)
+
+	suite.Empty(output.Bytes())
+	listener.OnResolveEvent(event)
+	suite.assertResolveEntry(output, event, zapcore.InfoLevel)
+}
+
+func (suite *ListenerSuite) testOnResolveEventError() {
+	var (
+		expectedError = errors.New("expected")
+
+		logger, output = suite.newTestLogger(zapcore.ErrorLevel)
+		listener       = suite.newListener(WithLogger(logger))
+
+		event = clortho.ResolveEvent{
+			URI:   "https://getkeys.com/foo",
+			KeyID: "foo",
+			// NOTE: we don't use the Key field for logging
+			Err: expectedError,
+		}
+	)
+
+	suite.Empty(output.Bytes())
+	listener.OnResolveEvent(event)
+	suite.assertResolveEntry(output, event, zapcore.ErrorLevel)
+}
+
+func (suite *ListenerSuite) testOnResolveEventDisabled() {
+	var (
+		logger, output = suite.newTestLogger(zapcore.PanicLevel)
+		listener       = suite.newListener(WithLogger(logger))
+	)
+
+	suite.Empty(output.Bytes())
+	listener.OnResolveEvent(clortho.ResolveEvent{
+		URI: "http://does.not.matter",
+	})
+
+	suite.Empty(output.Bytes())
+}
+
+func (suite *ListenerSuite) TestOnResolveEvent() {
+	suite.Run("NoError", suite.testOnResolveEventNoError)
+	suite.Run("Error", suite.testOnResolveEventError)
+	suite.Run("Disabled", suite.testOnResolveEventDisabled)
 }
 
 func TestListener(t *testing.T) {
