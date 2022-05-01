@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 - clorthozap package provides basic integration with go.uber.org/zap [#22](https://github.com/xmidt-org/clortho/issues/22)
 - updated github.com/lestrrat-go/jwx to 2.0.0
+- clorthometrics package provides integration with Prometheus [#21](https://github.com/xmidt-org/clortho/issues/21)
 
 ## [v0.0.2]
 - Loader and Parser as low-level primitives for retrieving key material
