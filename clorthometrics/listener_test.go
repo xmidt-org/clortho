@@ -34,6 +34,9 @@ const (
 	RefreshKeysMetric   = "refresh_keys"
 	RefreshErrorsMetric = "refresh_errors"
 
+	ResolvesMetric      = "resolves"
+	ResolveErrorsMetric = "resolve_errors"
+
 	// keys is a jwk set used to stand-in for an event's Keys field
 	keys = `{
     "keys": [
@@ -60,6 +63,17 @@ const (
     ]
 }`
 )
+
+// errorListenerOption is a ListenerOption that returns an error.
+// This type is necessary because we currently don't have an option
+// that we can test NewListener when it returns an error.
+type errorListenerOption struct {
+	expectedError error
+}
+
+func (elo errorListenerOption) applyToListener(l *Listener) error {
+	return elo.expectedError
+}
 
 type ListenerSuite struct {
 	suite.Suite
@@ -122,6 +136,32 @@ func (suite *ListenerSuite) newRefreshErrors(f *touchstone.Factory) *prometheus.
 			Help: RefreshErrorsMetric, // necessary so that help text is consistent for assertions
 		},
 		SourceLabel,
+	)
+
+	suite.Require().NoError(err)
+	return cv
+}
+
+func (suite *ListenerSuite) newResolves(f *touchstone.Factory) *prometheus.CounterVec {
+	cv, err := f.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: ResolvesMetric,
+			Help: ResolvesMetric, // necessary so that help text is consistent for assertions
+		},
+		SourceLabel, KeyIDLabel,
+	)
+
+	suite.Require().NoError(err)
+	return cv
+}
+
+func (suite *ListenerSuite) newResolveErrors(f *touchstone.Factory) *prometheus.CounterVec {
+	cv, err := f.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: ResolveErrorsMetric,
+			Help: ResolveErrorsMetric, // necessary so that help text is consistent for assertions
+		},
+		SourceLabel, KeyIDLabel,
 	)
 
 	suite.Require().NoError(err)
@@ -233,8 +273,98 @@ func (suite *ListenerSuite) testOnResolveEventNoMetrics() {
 	})
 }
 
+func (suite *ListenerSuite) testOnResolveEventNoError() {
+	var (
+		expectedRegistry, expectedFactory = suite.newFactory()
+		actualRegistry, actualFactory     = suite.newFactory()
+
+		expectedResolves = suite.newResolves(expectedFactory)
+
+		l = suite.newListener(
+			WithResolves(suite.newResolves(actualFactory)),
+			WithResolveErrors(suite.newResolveErrors(actualFactory)),
+		)
+
+		metricAssert = touchtest.New(suite.T())
+	)
+
+	// resolve_errors should be unused for this test
+	suite.newResolveErrors(expectedFactory)
+
+	expectedResolves.With(prometheus.Labels{
+		SourceLabel: "http://getkeys.com/A",
+		KeyIDLabel:  "A",
+	}).Add(1.0)
+
+	metricAssert.Expect(expectedRegistry)
+
+	l.OnResolveEvent(clortho.ResolveEvent{
+		URI:   "http://getkeys.com/A",
+		KeyID: "A",
+		// Keys is unused by the metrics
+	})
+
+	metricAssert.GatherAndCompare(
+		actualRegistry,
+		ResolvesMetric, ResolveErrorsMetric,
+	)
+}
+
+func (suite *ListenerSuite) testOnResolveEventError() {
+	var (
+		expectedRegistry, expectedFactory = suite.newFactory()
+		actualRegistry, actualFactory     = suite.newFactory()
+
+		expectedResolves      = suite.newResolves(expectedFactory)
+		expectedResolveErrors = suite.newResolveErrors(expectedFactory)
+
+		l = suite.newListener(
+			WithResolves(suite.newResolves(actualFactory)),
+			WithResolveErrors(suite.newResolveErrors(actualFactory)),
+		)
+
+		metricAssert = touchtest.New(suite.T())
+	)
+
+	expectedResolves.With(prometheus.Labels{
+		SourceLabel: "http://getkeys.com/A",
+		KeyIDLabel:  "A",
+	}).Add(1.0)
+
+	expectedResolveErrors.With(prometheus.Labels{
+		SourceLabel: "http://getkeys.com/A",
+		KeyIDLabel:  "A",
+	}).Add(1.0)
+
+	metricAssert.Expect(expectedRegistry)
+
+	l.OnResolveEvent(clortho.ResolveEvent{
+		URI:   "http://getkeys.com/A",
+		KeyID: "A",
+		Err:   errors.New("expected"),
+		// Keys is unused by the metrics
+	})
+
+	metricAssert.GatherAndCompare(
+		actualRegistry,
+		ResolvesMetric, ResolveErrorsMetric,
+	)
+}
+
 func (suite *ListenerSuite) TestOnResolveEvent() {
 	suite.Run("NoMetrics", suite.testOnResolveEventNoMetrics)
+	suite.Run("NoError", suite.testOnResolveEventNoError)
+	suite.Run("Error", suite.testOnResolveEventError)
+}
+
+func (suite *ListenerSuite) TestError() {
+	var (
+		expectedError = errors.New("expected")
+		listener, err = NewListener(errorListenerOption{expectedError: expectedError})
+	)
+
+	suite.Nil(listener)
+	suite.ErrorIs(err, expectedError)
 }
 
 func TestListener(t *testing.T) {
