@@ -195,3 +195,22 @@ func WithFetcher(f Fetcher) ResolverRefresherOption {
 		f: f,
 	}
 }
+
+type configOption struct {
+	cfg Config
+}
+
+func (co configOption) applyToRefresher(r *refresher) error {
+	return WithSources(co.cfg.Refresh.Sources...).applyToRefresher(r)
+}
+
+func (co configOption) applyToResolver(r *resolver) error {
+	return WithKeyIDTemplate(co.cfg.Resolve.Template).applyToResolver(r)
+}
+
+// WithConfig uses a Config struct to configure a Refresher and/or Resolver.
+func WithConfig(cfg Config) ResolverRefresherOption {
+	return configOption{
+		cfg: cfg,
+	}
+}
