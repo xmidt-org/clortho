@@ -73,14 +73,14 @@ type ZapIn struct {
 	Logger *zap.Logger `optional:"true"`
 }
 
-func newZapListener(in ZapIn) (*clorthozap.Listener, error) {
+func newZapListener(in ZapIn) (l *clorthozap.Listener, err error) {
 	if in.Logger != nil {
-		return clorthozap.NewListener(
+		l, err = clorthozap.NewListener(
 			clorthozap.WithLogger(in.Logger),
 		)
 	}
 
-	return nil, nil
+	return
 }
 
 type MetricsIn struct {
@@ -88,12 +88,12 @@ type MetricsIn struct {
 	Factory *touchstone.Factory `optional:"true"`
 }
 
-func newMetricsListener(in MetricsIn) (*clorthometrics.Listener, error) {
+func newMetricsListener(in MetricsIn) (l *clorthometrics.Listener, err error) {
 	if in.Factory != nil {
 		// TODO
 	}
 
-	return nil, nil
+	return
 }
 
 type RefresherIn struct {
