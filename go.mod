@@ -9,6 +9,7 @@ require (
 	github.com/stretchr/testify v1.7.1
 	github.com/xmidt-org/chronon v0.1.1
 	github.com/xmidt-org/touchstone v0.1.0
+	go.uber.org/fx v1.17.1
 	go.uber.org/multierr v1.8.0
 	go.uber.org/zap v1.21.0
 	gopkg.in/h2non/gock.v1 v1.1.2
@@ -35,7 +36,6 @@ require (
 	github.com/stretchr/objx v0.3.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/dig v1.14.1 // indirect
-	go.uber.org/fx v1.17.1 // indirect
 	golang.org/x/crypto v0.0.0-20220427172511-eb4f295cb31f // indirect
 	golang.org/x/sys v0.0.0-20220429233432-b5fbb4746d32 // indirect
 	google.golang.org/protobuf v1.28.0 // indirect
