@@ -34,6 +34,9 @@ type Listener struct {
 	resolveErrorTotal *prometheus.CounterVec
 }
 
+var _ clortho.RefreshListener = (*Listener)(nil)
+var _ clortho.ResolveListener = (*Listener)(nil)
+
 // NewListener creates a metrics Listener using a touchstone Factory to
 // create and register the metrics.
 func NewListener(f *touchstone.Factory) (l *Listener, err error) {
