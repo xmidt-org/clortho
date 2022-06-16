@@ -306,7 +306,7 @@ func (suite *ListenerSuite) TestDefault() {
 	suite.NotNil(listener.logger)
 }
 
-func (suite *ListenerSuite) TestError() {
+func (suite *ListenerSuite) TestNewListenerError() {
 	var (
 		expectedError = errors.New("expected")
 		listener, err = NewListener(errorListenerOption{expectedError: expectedError})

@@ -57,6 +57,17 @@ const (
 }`
 )
 
+// errorListenerOption is a ListenerOption that returns an error.
+// This type is necessary because we currently don't have an option
+// that we can test NewListener when it returns an error.
+type errorListenerOption struct {
+	expectedError error
+}
+
+func (elo errorListenerOption) applyToListener(l *Listener) error {
+	return elo.expectedError
+}
+
 type ListenerSuite struct {
 	suite.Suite
 
@@ -79,10 +90,20 @@ func (suite *ListenerSuite) newFactory() (*prometheus.Registry, *touchstone.Fact
 }
 
 func (suite *ListenerSuite) newListener(f *touchstone.Factory) *Listener {
-	l, err := NewListener(f)
+	l, err := NewListener(WithFactory(f))
 	suite.Require().NoError(err)
 	suite.Require().NotNil(l)
 	return l
+}
+
+func (suite *ListenerSuite) TestNewListenerError() {
+	var (
+		expectedError = errors.New("expected")
+		listener, err = NewListener(errorListenerOption{expectedError: expectedError})
+	)
+
+	suite.Nil(listener)
+	suite.ErrorIs(err, expectedError)
 }
 
 func (suite *ListenerSuite) testOnRefreshEventSuccess() {
