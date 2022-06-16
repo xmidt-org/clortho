@@ -239,14 +239,31 @@ func (suite *ListenerSuite) testOnRefreshEventNoError() {
 
 	for _, testCase := range testCases {
 		suite.Run(testCase.description, func() {
-			var (
-				logger, output = suite.newTestLogger(zapcore.InfoLevel)
-				listener       = suite.newListener(WithLogger(logger))
-			)
+			suite.Run("DefaultLevel", func() {
+				suite.Run(testCase.description, func() {
+					var (
+						logger, output = suite.newTestLogger(zapcore.InfoLevel)
+						listener       = suite.newListener(WithLogger(logger))
+					)
 
-			suite.Empty(output.Bytes())
-			listener.OnRefreshEvent(testCase.event)
-			suite.assertRefreshEntry(output, testCase.event, zapcore.InfoLevel)
+					suite.Empty(output.Bytes())
+					listener.OnRefreshEvent(testCase.event)
+					suite.assertRefreshEntry(output, testCase.event, zapcore.InfoLevel)
+				})
+			})
+
+			suite.Run("CustomLevel", func() {
+				suite.Run(testCase.description, func() {
+					var (
+						logger, output = suite.newTestLogger(zapcore.DebugLevel)
+						listener       = suite.newListener(WithLogger(logger), WithLevel(zap.DebugLevel))
+					)
+
+					suite.Empty(output.Bytes())
+					listener.OnRefreshEvent(testCase.event)
+					suite.assertRefreshEntry(output, testCase.event, zapcore.DebugLevel)
+				})
+			})
 		})
 	}
 }
