@@ -30,6 +30,12 @@ import (
 // uses for its components.
 const Module = "clortho"
 
+// newKeyRing creates the key ring component.  This is in a separate function
+// to make debugging easier, as it will show up in fx's logs.
+func newKeyRing() clortho.KeyRing {
+	return clortho.NewKeyRing()
+}
+
 // FetcherIn specifies the components that the clortho.Fetcher component depends upon.
 type FetcherIn struct {
 	fx.In
@@ -117,8 +123,11 @@ func newMetricsListener(in MetricsIn) (l *clorthometrics.Listener, err error) {
 type RefresherIn struct {
 	fx.In
 
+	// KeyRing is the key ring to refresh.  This will be either supplied from the
+	// enclosing application or internally created within this module.
+	KeyRing clortho.KeyRing
+
 	Fetcher         clortho.Fetcher
-	KeyRing         clortho.KeyRing          `optional:"true"`
 	Config          clortho.Config           `optional:"true"`
 	ZapListener     *clorthozap.Listener     `optional:"true"`
 	MetricsListener *clorthometrics.Listener `optional:"true"`
@@ -141,10 +150,7 @@ func newRefresher(in RefresherIn) (r clortho.Refresher, err error) {
 			r.AddListener(in.MetricsListener)
 		}
 
-		if in.KeyRing != nil {
-			r.AddListener(in.KeyRing)
-		}
-
+		r.AddListener(in.KeyRing)
 		in.Lifecycle.Append(fx.Hook{
 			OnStart: r.Start,
 			OnStop:  r.Stop,
@@ -178,30 +184,18 @@ func newResolver(in ResolverIn) (r clortho.Resolver, err error) {
 	return
 }
 
-// KeyRingIn enumerates the set of components required to create the application's
-// KeyRing.
-type KeyRingIn struct {
-	fx.In
-
-	InitialKeys []clortho.Key `optional:"true"`
-	Refresher   clortho.Refresher
-}
-
-func newKeyRing(in KeyRingIn) (kr clortho.KeyRing) {
-	kr = clortho.NewKeyRing(in.InitialKeys...)
-	in.Refresher.AddListener(kr)
-
-	return
-}
-
 // newKeyAccessor just returns the key ring as is for now.
 // Future versions may do some kind of decoration.
 func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
 	return kr
 }
 
-// Provide bootstraps the clortho module.  This module provides the following
-// components:
+// Provide bootstraps the clortho module.
+//
+// If a clortho.KeyRing is present in the enclosing application, it will be used as the
+// cache for the resolver and refresher.  Otherwise, an internal key ring is created and used.
+//
+// This module provides the following components:
 //
 //   - clortho.Fetcher
 //     An optional clortho.Parser and clortho.Loader may be supplied to tailor this component.
@@ -219,14 +213,9 @@ func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
 //
 //   - clortho.Resolver
 //
-//   - clortho.KeyRing
-//
 //   - clortho.KeyAccessor
 //     This is the same component as the key ring, but may be decorated in future versions.
 //     Clients that only need read access to the key ring should use this component.
-//
-// If any of the above components are not referred to, they will not be created as per
-// the usual go.uber.org/fx behavior.
 func Provide() fx.Option {
 	return fx.Module(
 		Module,
@@ -234,13 +223,18 @@ func Provide() fx.Option {
 			decorateLogger,
 		),
 		fx.Provide(
+			newKeyRing,
 			newFetcher,
 			newZapListener,
 			newMetricsListener,
 			newRefresher,
 			newResolver,
-			newKeyRing,
 			newKeyAccessor,
+		),
+		fx.Invoke(
+			// eagerly load the refresher so that it's background
+			// goroutine(s) start
+			func(clortho.Refresher) {},
 		),
 	)
 }
