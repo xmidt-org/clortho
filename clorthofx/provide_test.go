@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"github.com/xmidt-org/clortho"
+	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
 )
 
@@ -28,13 +30,40 @@ type ProvideSuite struct {
 	suite.Suite
 }
 
-func (suite *ProvideSuite) TestDefaults() {
+// newFxTest creates a test App using the supplied options
+func (suite *ProvideSuite) newFxTest(o ...fx.Option) *fxtest.App {
 	app := fxtest.New(
 		suite.T(),
-		Provide(),
+		o...,
+	)
+
+	suite.Require().NotNil(app)
+	suite.Require().NoError(app.Err())
+	return app
+}
+
+func (suite *ProvideSuite) TestDefaults() {
+	var (
+		kr        clortho.KeyRing
+		resolver  clortho.Resolver
+		refresher clortho.Refresher
+
+		app = suite.newFxTest(
+			Provide(),
+			fx.Populate(
+				&kr,
+				&resolver,
+				&refresher,
+			),
+		)
 	)
 
 	app.RequireStart()
+
+	suite.Require().NotNil(kr)
+	suite.Require().NotNil(resolver)
+	suite.Require().NotNil(refresher)
+
 	app.RequireStop()
 }
 

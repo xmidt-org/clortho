@@ -197,6 +197,10 @@ func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
 //
 // This module provides the following components:
 //
+//   - clortho.KeyRing
+//     Available as a component itself, this is also used as the cache for the resolver and
+//     is refreshed using the injected clortho.Config configuration.
+//
 //   - clortho.Fetcher
 //     An optional clortho.Parser and clortho.Loader may be supplied to tailor this component.
 //     If no parser or loader are supplied, the package defaults are used.
