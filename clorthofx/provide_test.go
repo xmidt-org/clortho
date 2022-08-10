@@ -18,16 +18,22 @@
 package clorthofx
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/xmidt-org/clortho"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
+	"gopkg.in/h2non/gock.v1"
 )
 
 type ProvideSuite struct {
 	suite.Suite
+}
+
+func (suite *ProvideSuite) TearDownTest() {
+	gock.OffAll()
 }
 
 // newFxTest creates a test App using the supplied options
@@ -64,9 +70,21 @@ func (suite *ProvideSuite) TestDefaults() {
 	suite.Require().NotNil(resolver)
 	suite.Require().NotNil(refresher)
 
+	// TODO: how best to test the refresher here?
+
+	key, err := resolver.Resolve(
+		context.Background(),
+		"test",
+	)
+
+	suite.Nil(key)
+	suite.Error(err)
+
 	app.RequireStop()
 }
 
+// TODO: flesh these tests out with gock, possibly using
+// an internal package for the common testing code
 func TestProvide(t *testing.T) {
 	suite.Run(t, new(ProvideSuite))
 }
