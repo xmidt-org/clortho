@@ -69,14 +69,14 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 //
 // The returned Parser handles the following formats by default:
 //
-//  application/json
-//  application/jwk+json
-//  application/jwk-set+json
-//  application/x-pem-file
-//  .json
-//  .jwk
-//  .jwk-set
-//  .pem
+//    application/json
+//    application/jwk+json
+//    application/jwk-set+json
+//    application/x-pem-file
+//    .json
+//    .jwk
+//    .jwk-set
+//    .pem
 //
 // A caller can use WithFormats to change the parser associated with a format or
 // to register a Parser for a new, custom format.
