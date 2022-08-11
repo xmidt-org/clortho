@@ -35,7 +35,7 @@ require (
 	github.com/stretchr/objx v0.4.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/dig v1.15.0 // indirect
-	go.uber.org/fx v1.17.1
+	go.uber.org/fx v1.18.1
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa // indirect
 	golang.org/x/sys v0.0.0-20220804214406-8e32c043e418 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
