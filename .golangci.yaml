@@ -1,8 +1,4 @@
 ---
-linters-settings:
-  misspell:
-    locale: US
-
 linters:
   enable:
     - bodyclose
@@ -27,6 +23,8 @@ issues:
         - unused
 
 linters-settings:
+  misspell:
+    locale: US
   errorlint:
     # Report non-wrapping error creation using fmt.Errorf
     errorf: false
