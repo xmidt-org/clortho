@@ -20,18 +20,12 @@ package clorthometrics
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xmidt-org/clortho"
+	"github.com/xmidt-org/touchstone"
 	"go.uber.org/multierr"
 )
 
-const (
-	// SourceLabel is the metric label indicating the URI source of the key(s).
-	SourceLabel = "source"
-
-	// KeyIDLabel is the metric label indicating the key ID that was resolved.
-	KeyIDLabel = "keyID"
-)
-
-// ListenerOption is a configuration option for creating a Listener.
+// ListenerOption is a configurable option passed to NewListener that
+// can tailor the created Listener.
 type ListenerOption interface {
 	applyToListener(*Listener) error
 }
@@ -42,69 +36,49 @@ func (lof listenerOptionFunc) applyToListener(l *Listener) error {
 	return lof(l)
 }
 
-// WithRefreshes sets the counter for refresh events.  The given counter must
-// have exactly (1) label: SourceLabel.
-func WithRefreshes(c *prometheus.CounterVec) ListenerOption {
-	return listenerOptionFunc(func(l *Listener) error {
-		l.refreshes = c
-		return nil
+// WithFactory populates a listener with metrics created via the given factory.
+func WithFactory(f *touchstone.Factory) ListenerOption {
+	return listenerOptionFunc(func(l *Listener) (err error) {
+		var metricErr error
+		l.refreshTotal, metricErr = newRefreshTotal(f)
+		err = multierr.Append(err, metricErr)
+
+		l.refreshKeys, metricErr = newRefreshKeys(f)
+		err = multierr.Append(err, metricErr)
+
+		l.refreshErrorTotal, metricErr = newRefreshErrorTotal(f)
+		err = multierr.Append(err, metricErr)
+
+		l.resolveTotal, metricErr = newResolveTotal(f)
+		err = multierr.Append(err, metricErr)
+
+		l.resolveErrorTotal, metricErr = newResolveErrorTotal(f)
+		err = multierr.Append(err, metricErr)
+
+		return
 	})
 }
 
-// WithRefreshKeys sets the gauge for refresh events.  The given counter must
-// have exactly (1) label: SourceLabel.
-func WithRefreshKeys(g *prometheus.GaugeVec) ListenerOption {
-	return listenerOptionFunc(func(l *Listener) error {
-		l.refreshKeys = g
-		return nil
-	})
-}
-
-// WithRefreshErrors sets the counter for refresh errors.  The given counter must
-// have exactly (1) label: SourceLabel.
-func WithRefreshErrors(c *prometheus.CounterVec) ListenerOption {
-	return listenerOptionFunc(func(l *Listener) error {
-		l.refreshErrors = c
-		return nil
-	})
-}
-
-// WithResolves sets the counter for resolve events.  The given counter must
-// have exactly (2) labels: SourceLabel and KeyIDLabel.
-func WithResolves(c *prometheus.CounterVec) ListenerOption {
-	return listenerOptionFunc(func(l *Listener) error {
-		l.resolves = c
-		return nil
-	})
-}
-
-// WithResolveErrors sets the counter for resolve errors.  The given counter must
-// have exactly (2) labels: SourceLabel and KeyIDLabel.
-func WithResolveErrors(c *prometheus.CounterVec) ListenerOption {
-	return listenerOptionFunc(func(l *Listener) error {
-		l.resolveErrors = c
-		return nil
-	})
-}
-
-// Listener handle refresh and resolve events, tallying metrics for both.
+// Listener handles refresh and resolve events, tallying metrics for both.
 type Listener struct {
-	refreshes     *prometheus.CounterVec
-	refreshKeys   *prometheus.GaugeVec
-	refreshErrors *prometheus.CounterVec
+	refreshTotal      *prometheus.CounterVec
+	refreshKeys       *prometheus.GaugeVec
+	refreshErrorTotal *prometheus.CounterVec
 
-	resolves      *prometheus.CounterVec
-	resolveErrors *prometheus.CounterVec
+	resolveTotal      *prometheus.CounterVec
+	resolveErrorTotal *prometheus.CounterVec
 }
 
-// NewListener constructs a new metrics Listener from a set of options.
-// No metrics are defaulted.  If no options are passed, the returned
-// Listener will track nothing.
+var _ clortho.RefreshListener = (*Listener)(nil)
+var _ clortho.ResolveListener = (*Listener)(nil)
+
+// NewListener creates a metrics Listener using the supplied set of options.
+// If no options are passed, the returned Listener will be a no-op.
 func NewListener(options ...ListenerOption) (l *Listener, err error) {
 	l = &Listener{}
 
 	for _, o := range options {
-		err = multierr.Append(err, o.applyToListener(l))
+		err = o.applyToListener(l)
 	}
 
 	if err != nil {
@@ -120,16 +94,11 @@ func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 		SourceLabel: event.URI,
 	}
 
-	if l.refreshes != nil {
-		l.refreshes.With(labels).Add(1.0)
-	}
+	l.refreshTotal.With(labels).Add(1.0)
+	l.refreshKeys.With(labels).Set(float64(event.Keys.Len()))
 
-	if l.refreshKeys != nil {
-		l.refreshKeys.With(labels).Set(float64(event.Keys.Len()))
-	}
-
-	if event.Err != nil && l.refreshErrors != nil {
-		l.refreshErrors.With(labels).Add(1.0)
+	if event.Err != nil {
+		l.refreshErrorTotal.With(labels).Add(1.0)
 	}
 }
 
@@ -140,11 +109,9 @@ func (l *Listener) OnResolveEvent(event clortho.ResolveEvent) {
 		KeyIDLabel:  event.KeyID,
 	}
 
-	if l.resolves != nil {
-		l.resolves.With(labels).Add(1.0)
-	}
+	l.resolveTotal.With(labels).Add(1.0)
 
-	if event.Err != nil && l.resolveErrors != nil {
-		l.resolveErrors.With(labels).Add(1.0)
+	if event.Err != nil {
+		l.resolveErrorTotal.With(labels).Add(1.0)
 	}
 }

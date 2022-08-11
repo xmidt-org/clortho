@@ -30,13 +30,6 @@ import (
 )
 
 const (
-	RefreshesMetric     = "refreshes"
-	RefreshKeysMetric   = "refresh_keys"
-	RefreshErrorsMetric = "refresh_errors"
-
-	ResolvesMetric      = "resolves"
-	ResolveErrorsMetric = "resolve_errors"
-
 	// keys is a jwk set used to stand-in for an event's Keys field
 	keys = `{
     "keys": [
@@ -90,274 +83,20 @@ func (suite *ListenerSuite) SetupSuite() {
 	suite.Require().NoError(err)
 }
 
-func (suite *ListenerSuite) newListener(options ...ListenerOption) *Listener {
-	l, err := NewListener(options...)
-	suite.Require().NoError(err)
-	suite.Require().NotNil(l)
-	return l
-}
-
 func (suite *ListenerSuite) newFactory() (*prometheus.Registry, *touchstone.Factory) {
 	r := prometheus.NewPedanticRegistry()
 	f := touchstone.NewFactory(touchstone.Config{}, zap.L(), r)
 	return r, f
 }
 
-func (suite *ListenerSuite) newRefreshes(f *touchstone.Factory) *prometheus.CounterVec {
-	cv, err := f.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: RefreshesMetric,
-			Help: RefreshesMetric, // necessary so that help text is consistent for assertions
-		},
-		SourceLabel,
-	)
-
+func (suite *ListenerSuite) newListener(f *touchstone.Factory) *Listener {
+	l, err := NewListener(WithFactory(f))
 	suite.Require().NoError(err)
-	return cv
+	suite.Require().NotNil(l)
+	return l
 }
 
-func (suite *ListenerSuite) newRefreshKeys(f *touchstone.Factory) *prometheus.GaugeVec {
-	gv, err := f.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: RefreshKeysMetric,
-			Help: RefreshKeysMetric, // necessary so that help text is consistent for assertions
-		},
-		SourceLabel,
-	)
-
-	suite.Require().NoError(err)
-	return gv
-}
-
-func (suite *ListenerSuite) newRefreshErrors(f *touchstone.Factory) *prometheus.CounterVec {
-	cv, err := f.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: RefreshErrorsMetric,
-			Help: RefreshErrorsMetric, // necessary so that help text is consistent for assertions
-		},
-		SourceLabel,
-	)
-
-	suite.Require().NoError(err)
-	return cv
-}
-
-func (suite *ListenerSuite) newResolves(f *touchstone.Factory) *prometheus.CounterVec {
-	cv, err := f.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: ResolvesMetric,
-			Help: ResolvesMetric, // necessary so that help text is consistent for assertions
-		},
-		SourceLabel, KeyIDLabel,
-	)
-
-	suite.Require().NoError(err)
-	return cv
-}
-
-func (suite *ListenerSuite) newResolveErrors(f *touchstone.Factory) *prometheus.CounterVec {
-	cv, err := f.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: ResolveErrorsMetric,
-			Help: ResolveErrorsMetric, // necessary so that help text is consistent for assertions
-		},
-		SourceLabel, KeyIDLabel,
-	)
-
-	suite.Require().NoError(err)
-	return cv
-}
-
-func (suite *ListenerSuite) testOnRefreshEventNoMetrics() {
-	l := suite.newListener()
-	l.OnRefreshEvent(clortho.RefreshEvent{
-		URI: "http://does.not.matter",
-	})
-}
-
-func (suite *ListenerSuite) testOnRefreshEventNoError() {
-	var (
-		expectedRegistry, expectedFactory = suite.newFactory()
-		actualRegistry, actualFactory     = suite.newFactory()
-
-		expectedRefreshes   = suite.newRefreshes(expectedFactory)
-		expectedRefreshKeys = suite.newRefreshKeys(expectedFactory)
-
-		l = suite.newListener(
-			WithRefreshes(suite.newRefreshes(actualFactory)),
-			WithRefreshKeys(suite.newRefreshKeys(actualFactory)),
-			WithRefreshErrors(suite.newRefreshErrors(actualFactory)),
-		)
-
-		metricAssert = touchtest.New(suite.T())
-	)
-
-	// refresh_errors should be unused for this test
-	suite.newRefreshErrors(expectedFactory)
-
-	expectedRefreshes.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/keys",
-	}).Add(1.0)
-
-	expectedRefreshKeys.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/keys",
-	}).Set(2.0)
-
-	metricAssert.Expect(expectedRegistry)
-
-	l.OnRefreshEvent(clortho.RefreshEvent{
-		URI:  "http://getkeys.com/keys",
-		Keys: suite.keys,
-	})
-
-	metricAssert.GatherAndCompare(
-		actualRegistry,
-		RefreshesMetric, RefreshKeysMetric, RefreshErrorsMetric,
-	)
-}
-
-func (suite *ListenerSuite) testOnRefreshEventError() {
-	var (
-		expectedRegistry, expectedFactory = suite.newFactory()
-		actualRegistry, actualFactory     = suite.newFactory()
-
-		expectedRefreshes     = suite.newRefreshes(expectedFactory)
-		expectedRefreshKeys   = suite.newRefreshKeys(expectedFactory)
-		expectedRefreshErrors = suite.newRefreshErrors(expectedFactory)
-
-		l = suite.newListener(
-			WithRefreshes(suite.newRefreshes(actualFactory)),
-			WithRefreshKeys(suite.newRefreshKeys(actualFactory)),
-			WithRefreshErrors(suite.newRefreshErrors(actualFactory)),
-		)
-
-		metricAssert = touchtest.New(suite.T())
-	)
-
-	expectedRefreshes.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/keys",
-	}).Add(1.0)
-
-	expectedRefreshKeys.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/keys",
-	}).Set(2.0)
-
-	expectedRefreshErrors.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/keys",
-	}).Add(1.0)
-
-	metricAssert.Expect(expectedRegistry)
-
-	l.OnRefreshEvent(clortho.RefreshEvent{
-		URI:  "http://getkeys.com/keys",
-		Keys: suite.keys,
-		Err:  errors.New("expected"),
-	})
-
-	metricAssert.GatherAndCompare(
-		actualRegistry,
-		RefreshesMetric, RefreshKeysMetric, RefreshErrorsMetric,
-	)
-}
-
-func (suite *ListenerSuite) TestOnRefreshEvent() {
-	suite.Run("NoMetrics", suite.testOnRefreshEventNoMetrics)
-	suite.Run("NoError", suite.testOnRefreshEventNoError)
-	suite.Run("Error", suite.testOnRefreshEventError)
-}
-
-func (suite *ListenerSuite) testOnResolveEventNoMetrics() {
-	l := suite.newListener()
-	l.OnResolveEvent(clortho.ResolveEvent{
-		URI: "http://does.not.matter",
-	})
-}
-
-func (suite *ListenerSuite) testOnResolveEventNoError() {
-	var (
-		expectedRegistry, expectedFactory = suite.newFactory()
-		actualRegistry, actualFactory     = suite.newFactory()
-
-		expectedResolves = suite.newResolves(expectedFactory)
-
-		l = suite.newListener(
-			WithResolves(suite.newResolves(actualFactory)),
-			WithResolveErrors(suite.newResolveErrors(actualFactory)),
-		)
-
-		metricAssert = touchtest.New(suite.T())
-	)
-
-	// resolve_errors should be unused for this test
-	suite.newResolveErrors(expectedFactory)
-
-	expectedResolves.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/A",
-		KeyIDLabel:  "A",
-	}).Add(1.0)
-
-	metricAssert.Expect(expectedRegistry)
-
-	l.OnResolveEvent(clortho.ResolveEvent{
-		URI:   "http://getkeys.com/A",
-		KeyID: "A",
-		// Keys is unused by the metrics
-	})
-
-	metricAssert.GatherAndCompare(
-		actualRegistry,
-		ResolvesMetric, ResolveErrorsMetric,
-	)
-}
-
-func (suite *ListenerSuite) testOnResolveEventError() {
-	var (
-		expectedRegistry, expectedFactory = suite.newFactory()
-		actualRegistry, actualFactory     = suite.newFactory()
-
-		expectedResolves      = suite.newResolves(expectedFactory)
-		expectedResolveErrors = suite.newResolveErrors(expectedFactory)
-
-		l = suite.newListener(
-			WithResolves(suite.newResolves(actualFactory)),
-			WithResolveErrors(suite.newResolveErrors(actualFactory)),
-		)
-
-		metricAssert = touchtest.New(suite.T())
-	)
-
-	expectedResolves.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/A",
-		KeyIDLabel:  "A",
-	}).Add(1.0)
-
-	expectedResolveErrors.With(prometheus.Labels{
-		SourceLabel: "http://getkeys.com/A",
-		KeyIDLabel:  "A",
-	}).Add(1.0)
-
-	metricAssert.Expect(expectedRegistry)
-
-	l.OnResolveEvent(clortho.ResolveEvent{
-		URI:   "http://getkeys.com/A",
-		KeyID: "A",
-		Err:   errors.New("expected"),
-		// Keys is unused by the metrics
-	})
-
-	metricAssert.GatherAndCompare(
-		actualRegistry,
-		ResolvesMetric, ResolveErrorsMetric,
-	)
-}
-
-func (suite *ListenerSuite) TestOnResolveEvent() {
-	suite.Run("NoMetrics", suite.testOnResolveEventNoMetrics)
-	suite.Run("NoError", suite.testOnResolveEventNoError)
-	suite.Run("Error", suite.testOnResolveEventError)
-}
-
-func (suite *ListenerSuite) TestError() {
+func (suite *ListenerSuite) TestNewListenerError() {
 	var (
 		expectedError = errors.New("expected")
 		listener, err = NewListener(errorListenerOption{expectedError: expectedError})
@@ -365,6 +104,124 @@ func (suite *ListenerSuite) TestError() {
 
 	suite.Nil(listener)
 	suite.ErrorIs(err, expectedError)
+}
+
+func (suite *ListenerSuite) testOnRefreshEventSuccess() {
+	var (
+		actual, actualFactory = suite.newFactory()
+		actualListener        = suite.newListener(actualFactory)
+
+		expected, expectedFactory = suite.newFactory()
+		expectedListener          = suite.newListener(expectedFactory)
+		expectedLabels            = prometheus.Labels{
+			SourceLabel: "https://getkeys.com",
+		}
+
+		assert = touchtest.New(suite.T())
+	)
+
+	expectedListener.refreshTotal.With(expectedLabels).Add(1.0)
+	expectedListener.refreshKeys.With(expectedLabels).Set(float64(len(suite.keys)))
+	assert.Expect(expected)
+
+	actualListener.OnRefreshEvent(clortho.RefreshEvent{
+		URI:  "https://getkeys.com",
+		Keys: suite.keys,
+	})
+
+	assert.GatherAndCompare(actual)
+}
+
+func (suite *ListenerSuite) testOnRefreshEventError() {
+	var (
+		actual, actualFactory = suite.newFactory()
+		actualListener        = suite.newListener(actualFactory)
+
+		expected, expectedFactory = suite.newFactory()
+		expectedListener          = suite.newListener(expectedFactory)
+		expectedLabels            = prometheus.Labels{
+			SourceLabel: "https://getkeys.com",
+		}
+
+		assert = touchtest.New(suite.T())
+	)
+
+	expectedListener.refreshTotal.With(expectedLabels).Add(1.0)
+	expectedListener.refreshErrorTotal.With(expectedLabels).Add(1.0)
+	expectedListener.refreshKeys.With(expectedLabels).Set(float64(len(suite.keys)))
+	assert.Expect(expected)
+
+	actualListener.OnRefreshEvent(clortho.RefreshEvent{
+		URI:  "https://getkeys.com",
+		Err:  errors.New("expected"),
+		Keys: suite.keys,
+	})
+
+	assert.GatherAndCompare(actual)
+}
+
+func (suite *ListenerSuite) TestOnRefreshEvent() {
+	suite.Run("Success", suite.testOnRefreshEventSuccess)
+	suite.Run("Error", suite.testOnRefreshEventError)
+}
+
+func (suite *ListenerSuite) testOnResolveEventSuccess() {
+	var (
+		actual, actualFactory = suite.newFactory()
+		actualListener        = suite.newListener(actualFactory)
+
+		expected, expectedFactory = suite.newFactory()
+		expectedListener          = suite.newListener(expectedFactory)
+		expectedLabels            = prometheus.Labels{
+			SourceLabel: "https://getkeys.com",
+			KeyIDLabel:  "test",
+		}
+
+		assert = touchtest.New(suite.T())
+	)
+
+	expectedListener.resolveTotal.With(expectedLabels).Add(1.0)
+	assert.Expect(expected)
+
+	actualListener.OnResolveEvent(clortho.ResolveEvent{
+		URI:   "https://getkeys.com",
+		KeyID: "test",
+	})
+
+	assert.GatherAndCompare(actual)
+}
+
+func (suite *ListenerSuite) testOnResolveEventError() {
+	var (
+		actual, actualFactory = suite.newFactory()
+		actualListener        = suite.newListener(actualFactory)
+
+		expected, expectedFactory = suite.newFactory()
+		expectedListener          = suite.newListener(expectedFactory)
+		expectedLabels            = prometheus.Labels{
+			SourceLabel: "https://getkeys.com",
+			KeyIDLabel:  "test",
+		}
+
+		assert = touchtest.New(suite.T())
+	)
+
+	expectedListener.resolveTotal.With(expectedLabels).Add(1.0)
+	expectedListener.resolveErrorTotal.With(expectedLabels).Add(1.0)
+	assert.Expect(expected)
+
+	actualListener.OnResolveEvent(clortho.ResolveEvent{
+		URI:   "https://getkeys.com",
+		KeyID: "test",
+		Err:   errors.New("expected"),
+	})
+
+	assert.GatherAndCompare(actual)
+}
+
+func (suite *ListenerSuite) TestOnResolveEvent() {
+	suite.Run("Success", suite.testOnResolveEventSuccess)
+	suite.Run("Error", suite.testOnResolveEventError)
 }
 
 func TestListener(t *testing.T) {

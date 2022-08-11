@@ -5,6 +5,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- clorthofx package provides integration with go.uber.org/fx [#20](https://github.com/xmidt-org/clortho/issues/20)
 - clorthozap package provides basic integration with go.uber.org/zap [#22](https://github.com/xmidt-org/clortho/issues/22)
 - updated github.com/lestrrat-go/jwx to 2.0.0
 - clorthometrics package provides integration with Prometheus [#21](https://github.com/xmidt-org/clortho/issues/21)

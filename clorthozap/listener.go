@@ -45,10 +45,23 @@ func WithLogger(logger *zap.Logger) ListenerOption {
 	})
 }
 
+// WithLevel sets the log level for non-error events.  By default, key refresh
+// and resolve events are logged at INFO level.
+//
+// Errors are always logged at ERROR level.  Error events are not controlled
+// by this option.
+func WithLevel(level zapcore.Level) ListenerOption {
+	return listenerOptionFunc(func(l *Listener) error {
+		l.level = level
+		return nil
+	})
+}
+
 // Listener is both a clortho.RefreshListener and a clortho.ResolveListener
 // that logs information about events via a supplied zap logger.
 type Listener struct {
 	logger *zap.Logger
+	level  zapcore.Level
 }
 
 var _ clortho.RefreshListener = (*Listener)(nil)
@@ -56,7 +69,9 @@ var _ clortho.ResolveListener = (*Listener)(nil)
 
 // NewListener constructs a *Listener that outputs to the supplied logger.
 func NewListener(options ...ListenerOption) (l *Listener, err error) {
-	l = &Listener{}
+	l = &Listener{
+		level: zap.InfoLevel,
+	}
 
 	for _, o := range options {
 		err = multierr.Append(err, o.applyToListener(l))
@@ -76,7 +91,7 @@ func NewListener(options ...ListenerOption) (l *Listener, err error) {
 // OnRefreshEvent outputs structured logging about the event to the logger
 // established via WithLogger when this listener was created.
 func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
-	level := zapcore.InfoLevel
+	level := l.level
 	if event.Err != nil {
 		level = zapcore.ErrorLevel
 	}
