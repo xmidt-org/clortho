@@ -17,7 +17,28 @@
 
 package clortho
 
-import "crypto"
+import (
+	"crypto"
+	"fmt"
+	"strings"
+
+	"go.uber.org/multierr"
+)
+
+// MIMEParametersNotSupportedError is returned when an attempt is made to register a parser
+// with a format that contains a semi-colon (';').  Formats may only be file suffixes
+// or media types.
+type MIMEParametersNotSupportedError struct {
+	Format string
+}
+
+// Error satisfies the error interface.
+func (mpnse MIMEParametersNotSupportedError) Error() string {
+	return fmt.Sprintf(
+		"Invalid format [%s]:  MIME parameters are not supported",
+		mpnse.Format,
+	)
+}
 
 // LoaderOption represents a configurable option for building a Loader.
 type LoaderOption interface {
@@ -56,12 +77,23 @@ func (pof parserOptionFunc) applyToParsers(ps *parsers) error { return pof(ps) }
 // string simply used as a way to look up a parsing algorithm.  Typically, a format is a
 // file suffix (including the leading '.') or a media type such as application/json.
 func WithFormats(p Parser, formats ...string) ParserOption {
-	return parserOptionFunc(func(ps *parsers) error {
+	return parserOptionFunc(func(ps *parsers) (err error) {
 		for _, f := range formats {
+			if strings.IndexByte(f, ':') >= 0 {
+				err = multierr.Append(
+					err,
+					MIMEParametersNotSupportedError{
+						Format: f,
+					},
+				)
+
+				continue
+			}
+
 			ps.p[f] = p
 		}
 
-		return nil
+		return
 	})
 }
 
