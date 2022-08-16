@@ -25,18 +25,19 @@ import (
 	"go.uber.org/multierr"
 )
 
-// MIMEParametersNotSupportedError is returned when an attempt is made to register a parser
-// with a format that contains a semi-colon (';').  Formats may only be file suffixes
-// or media types.
-type MIMEParametersNotSupportedError struct {
+// InvalidFormatError indicates that a format cannot be associated with a Parser
+// because the format string is invalid.  For example, format strings that contain
+// semi-colons (;) are invalid because matching a Parser by MIME parameters is
+// not supported.
+type InvalidFormatError struct {
 	Format string
 }
 
 // Error satisfies the error interface.
-func (mpnse MIMEParametersNotSupportedError) Error() string {
+func (ife InvalidFormatError) Error() string {
 	return fmt.Sprintf(
-		"Invalid format [%s]:  MIME parameters are not supported",
-		mpnse.Format,
+		"Cannot register invalid format [%s]",
+		ife.Format,
 	)
 }
 
@@ -82,7 +83,7 @@ func WithFormats(p Parser, formats ...string) ParserOption {
 			if strings.IndexByte(f, ';') >= 0 {
 				err = multierr.Append(
 					err,
-					MIMEParametersNotSupportedError{
+					InvalidFormatError{
 						Format: f,
 					},
 				)

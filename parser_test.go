@@ -341,7 +341,7 @@ func (suite *ParserSuite) TestUnsupportedFormat() {
 	keys, err := p.Parse(unsupportedFormat, []byte("does not matter"))
 	suite.Empty(keys)
 
-	var ufe *UnsupportedFormatError
+	var ufe UnsupportedFormatError
 	suite.Require().ErrorAs(err, &ufe)
 	suite.Equal(unsupportedFormat, ufe.Format)
 	suite.Contains(ufe.Error(), unsupportedFormat)
@@ -367,12 +367,17 @@ func (suite *ParserSuite) TestCustomParser() {
 }
 
 func (suite *ParserSuite) TestMIMEParameters() {
+	const formatWithParameters = "application/json;charset=utf-8"
 	p, err := NewParser(
-		WithFormats(nil, "application/json;charset=utf-8"),
+		WithFormats(nil, formatWithParameters),
 	)
 
 	suite.Nil(p)
-	suite.Error(err)
+
+	var ife InvalidFormatError
+	suite.Require().ErrorAs(err, &ife)
+	suite.Equal(formatWithParameters, ife.Format)
+	suite.Contains(ife.Error(), formatWithParameters)
 }
 
 func TestParser(t *testing.T) {

@@ -25,11 +25,13 @@ import (
 	"go.uber.org/multierr"
 )
 
+// UnsupportedFormatError indicates that a Parser cannot parse a given format.
 type UnsupportedFormatError struct {
 	Format string
 }
 
-func (ufe *UnsupportedFormatError) Error() string {
+// Error implements the error interface.
+func (ufe UnsupportedFormatError) Error() string {
 	return fmt.Sprintf("No parser configured for format %s", ufe.Format)
 }
 
@@ -65,7 +67,7 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 	if p, ok := ps.p[formatKey]; ok {
 		keys, err = p.Parse(formatKey, content)
 	} else {
-		err = &UnsupportedFormatError{
+		err = UnsupportedFormatError{
 			Format: format, // include the original format string, for easier debugging
 		}
 	}
