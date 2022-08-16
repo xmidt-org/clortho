@@ -120,7 +120,11 @@ func NewParser(options ...ParserOption) (Parser, error) {
 	)
 
 	for _, o := range options {
-		multierr.Append(err, o.applyToParsers(ps))
+		err = multierr.Append(err, o.applyToParsers(ps))
+	}
+
+	if err != nil {
+		ps = nil
 	}
 
 	return ps, err

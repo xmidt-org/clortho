@@ -363,6 +363,15 @@ func (suite *ParserSuite) TestCustomParser() {
 	suite.ErrorIs(err, expectedError)
 }
 
+func (suite *ParserSuite) TestMIMEParameters() {
+	p, err := NewParser(
+		WithFormats(nil, "application/json;charset=utf-8"),
+	)
+
+	suite.Nil(p)
+	suite.Error(err)
+}
+
 func TestParser(t *testing.T) {
 	suite.Run(t, new(ParserSuite))
 }

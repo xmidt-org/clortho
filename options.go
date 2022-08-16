@@ -79,7 +79,7 @@ func (pof parserOptionFunc) applyToParsers(ps *parsers) error { return pof(ps) }
 func WithFormats(p Parser, formats ...string) ParserOption {
 	return parserOptionFunc(func(ps *parsers) (err error) {
 		for _, f := range formats {
-			if strings.IndexByte(f, ':') >= 0 {
+			if strings.IndexByte(f, ';') >= 0 {
 				err = multierr.Append(
 					err,
 					MIMEParametersNotSupportedError{
