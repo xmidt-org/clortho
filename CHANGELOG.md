@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- WithFormats no longer accepts formats with semi-colons (;).  Matching parsers is done only one media type.
+- Parser.Parse strips any MIME parameters prior to looking up the parser associated with a format
 
 ## [v0.0.3]
 - clorthofx package provides integration with go.uber.org/fx [#20](https://github.com/xmidt-org/clortho/issues/20)

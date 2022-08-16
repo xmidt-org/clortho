@@ -17,7 +17,29 @@
 
 package clortho
 
-import "crypto"
+import (
+	"crypto"
+	"fmt"
+	"strings"
+
+	"go.uber.org/multierr"
+)
+
+// InvalidFormatError indicates that a format cannot be associated with a Parser
+// because the format string is invalid.  For example, format strings that contain
+// semi-colons (;) are invalid because matching a Parser by MIME parameters is
+// not supported.
+type InvalidFormatError struct {
+	Format string
+}
+
+// Error satisfies the error interface.
+func (ife InvalidFormatError) Error() string {
+	return fmt.Sprintf(
+		"Cannot register invalid format [%s]",
+		ife.Format,
+	)
+}
 
 // LoaderOption represents a configurable option for building a Loader.
 type LoaderOption interface {
@@ -56,12 +78,23 @@ func (pof parserOptionFunc) applyToParsers(ps *parsers) error { return pof(ps) }
 // string simply used as a way to look up a parsing algorithm.  Typically, a format is a
 // file suffix (including the leading '.') or a media type such as application/json.
 func WithFormats(p Parser, formats ...string) ParserOption {
-	return parserOptionFunc(func(ps *parsers) error {
+	return parserOptionFunc(func(ps *parsers) (err error) {
 		for _, f := range formats {
+			if strings.IndexByte(f, ';') >= 0 {
+				err = multierr.Append(
+					err,
+					InvalidFormatError{
+						Format: f,
+					},
+				)
+
+				continue
+			}
+
 			ps.p[f] = p
 		}
 
-		return nil
+		return
 	})
 }
 

@@ -19,16 +19,19 @@ package clortho
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"go.uber.org/multierr"
 )
 
+// UnsupportedFormatError indicates that a Parser cannot parse a given format.
 type UnsupportedFormatError struct {
 	Format string
 }
 
-func (ufe *UnsupportedFormatError) Error() string {
+// Error implements the error interface.
+func (ufe UnsupportedFormatError) Error() string {
 	return fmt.Sprintf("No parser configured for format %s", ufe.Format)
 }
 
@@ -39,7 +42,8 @@ type Parser interface {
 	//
 	// Format is an opaque string which used as a key to determine which parsing algorithm
 	// to apply to the data.  Most commonly, format is either a file suffix (including the
-	// leading '.') or a media type such as application/json.
+	// leading '.') or a media type such as application/json.  If format contains any MIME
+	// parameters, e.g. text/xml;charset=utf-8, they are ignored.
 	//
 	// Custom parsers should usually avoid trying to validate format.  This is because
 	// a Parser might be registered with a nonstandard format.  The format is available to
@@ -54,11 +58,17 @@ type parsers struct {
 }
 
 func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) {
-	if p, ok := ps.p[format]; ok {
-		keys, err = p.Parse(format, content)
+	formatKey := format
+	if i := strings.IndexByte(formatKey, ';'); i >= 0 {
+		// strip any MIME parameters, matching only on the media type
+		formatKey = formatKey[:i]
+	}
+
+	if p, ok := ps.p[formatKey]; ok {
+		keys, err = p.Parse(formatKey, content)
 	} else {
-		err = &UnsupportedFormatError{
-			Format: format,
+		err = UnsupportedFormatError{
+			Format: format, // include the original format string, for easier debugging
 		}
 	}
 
@@ -112,7 +122,11 @@ func NewParser(options ...ParserOption) (Parser, error) {
 	)
 
 	for _, o := range options {
-		multierr.Append(err, o.applyToParsers(ps))
+		err = multierr.Append(err, o.applyToParsers(ps))
+	}
+
+	if err != nil {
+		ps = nil
 	}
 
 	return ps, err
