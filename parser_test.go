@@ -225,6 +225,7 @@ func (suite *ParserSuite) testListPEM(format string) {
 func (suite *ParserSuite) TestListPEM() {
 	suite.Run(SuffixPEM, func() { suite.testListPEM(SuffixPEM) })
 	suite.Run(MediaTypePEM, func() { suite.testListPEM(MediaTypePEM) })
+	suite.Run(MediaTypePEM+";charset=us-ascii", func() { suite.testListPEM(MediaTypePEM + ";charset=us-ascii") })
 }
 
 func (suite *ParserSuite) testJWK(format string) {
@@ -254,6 +255,7 @@ func (suite *ParserSuite) TestJWK() {
 	suite.Run("RejectSet", func() {
 		suite.Run(SuffixJWK, func() { suite.testJWKRejectSet(SuffixJWK) })
 		suite.Run(MediaTypeJWK, func() { suite.testJWKRejectSet(MediaTypeJWK) })
+		suite.Run(MediaTypeJWK+";charset=utf-8", func() { suite.testJWKRejectSet(MediaTypeJWK + ";charset=utf-8") })
 	})
 }
 
@@ -329,6 +331,7 @@ func (suite *ParserSuite) TestJWKSet() {
 	suite.Run("Invalid", func() {
 		suite.Run(SuffixJWKSet, func() { suite.testJWKSetInvalid(SuffixJWKSet) })
 		suite.Run(MediaTypeJWKSet, func() { suite.testJWKSetInvalid(MediaTypeJWKSet) })
+		suite.Run(MediaTypeJWKSet+";charset=utf-8", func() { suite.testJWKSetInvalid(MediaTypeJWKSet + ";charset=utf-8") })
 	})
 }
 
