@@ -5,7 +5,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- WithFormats no longer accepts formats with semi-colons (;).  Matching parsers is done only one media type.
+
+## [v0.0.4]
+- WithFormats no longer accepts formats with semi-colons (;).  Matching parsers is done only one media type. Patches[#39](https://github.com/xmidt-org/clortho/issues/39).
 - Parser.Parse strips any MIME parameters prior to looking up the parser associated with a format
 
 ## [v0.0.3]
@@ -24,7 +26,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [v0.0.1]
 - Initial creation
 
-[Unreleased]: https://github.com/xmidt-org/clortho/compare/v0.0.3..HEAD
+[Unreleased]: https://github.com/xmidt-org/clortho/compare/v0.0.4..HEAD
+[v0.0.4]: https://github.com/xmidt-org/clortho/compare/v0.0.3...v0.0.4
 [v0.0.3]: https://github.com/xmidt-org/clortho/compare/v0.0.2...v0.0.3
 [v0.0.2]: https://github.com/xmidt-org/clortho/compare/v0.0.1...v0.0.2
 [v0.0.1]: https://github.com/xmidt-org/clortho/releases/v0.0.1
