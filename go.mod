@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/jtacoma/uritemplates v1.0.0
-	github.com/lestrrat-go/jwx/v2 v2.0.5
+	github.com/lestrrat-go/jwx/v2 v2.0.6
 	github.com/prometheus/client_golang v1.13.0
 	github.com/stretchr/testify v1.8.0
 	github.com/xmidt-org/chronon v0.1.1
@@ -18,8 +18,8 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
-	github.com/goccy/go-json v0.9.10 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.1.0 // indirect
+	github.com/goccy/go-json v0.9.11 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/h2non/parth v0.0.0-20190131123155-b4df798d6542 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.1 // indirect
