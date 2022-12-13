@@ -9,7 +9,7 @@ require (
 	github.com/stretchr/testify v1.8.1
 	github.com/xmidt-org/chronon v0.1.1
 	github.com/xmidt-org/touchstone v0.1.2
-	go.uber.org/multierr v1.8.0
+	go.uber.org/multierr v1.9.0
 	go.uber.org/zap v1.24.0
 	gopkg.in/h2non/gock.v1 v1.1.2
 )
