@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/jtacoma/uritemplates v1.0.0
-	github.com/lestrrat-go/jwx/v2 v2.0.10
+	github.com/lestrrat-go/jwx/v2 v2.0.11
 	github.com/prometheus/client_golang v1.15.1
 	github.com/stretchr/testify v1.8.4
 	github.com/xmidt-org/chronon v0.1.1
