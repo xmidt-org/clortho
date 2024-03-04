@@ -6,7 +6,7 @@ require (
 	github.com/jtacoma/uritemplates v1.0.0
 	github.com/lestrrat-go/jwx/v2 v2.0.20
 	github.com/prometheus/client_golang v1.18.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	github.com/xmidt-org/chronon v0.1.1
 	github.com/xmidt-org/touchstone v0.1.3
 	go.uber.org/multierr v1.11.0
@@ -35,7 +35,7 @@ require (
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
-	github.com/stretchr/objx v0.5.0 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	go.uber.org/dig v1.17.0 // indirect
 	go.uber.org/fx v1.20.1
 	golang.org/x/crypto v0.19.0 // indirect
