@@ -36,8 +36,8 @@ require (
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	go.uber.org/dig v1.17.1 // indirect
-	go.uber.org/fx v1.22.1
+	go.uber.org/dig v1.18.0 // indirect
+	go.uber.org/fx v1.22.2
 	golang.org/x/crypto v0.25.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
