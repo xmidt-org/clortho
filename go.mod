@@ -1,6 +1,6 @@
 module github.com/xmidt-org/clortho
 
-go 1.17
+go 1.22
 
 require (
 	github.com/jtacoma/uritemplates v1.0.0
@@ -36,8 +36,8 @@ require (
 	github.com/prometheus/common v0.45.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	go.uber.org/dig v1.18.0 // indirect
-	go.uber.org/fx v1.23.0
+	go.uber.org/dig v1.19.0 // indirect
+	go.uber.org/fx v1.24.0
 	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
