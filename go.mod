@@ -2,8 +2,6 @@ module github.com/xmidt-org/clortho
 
 go 1.23.0
 
-toolchain go1.24.0
-
 require (
 	github.com/jtacoma/uritemplates v1.0.0
 	github.com/lestrrat-go/jwx/v2 v2.1.6

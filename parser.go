@@ -1,19 +1,5 @@
-/**
- * Copyright 2022 Comcast Cable Communications Management, LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- */
+// SPDX-FileCopyrightText: 2025 Comcast Cable Communications Management, LLC
+// SPDX-License-Identifier: Apache-2.0
 
 package clortho
 
@@ -79,14 +65,14 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 //
 // The returned Parser handles the following formats by default:
 //
-//    application/json
-//    application/jwk+json
-//    application/jwk-set+json
-//    application/x-pem-file
-//    .json
-//    .jwk
-//    .jwk-set
-//    .pem
+//	application/json
+//	application/jwk+json
+//	application/jwk-set+json
+//	application/x-pem-file
+//	.json
+//	.jwk
+//	.jwk-set
+//	.pem
 //
 // A caller can use WithFormats to change the parser associated with a format or
 // to register a Parser for a new, custom format.
