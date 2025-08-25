@@ -6,7 +6,7 @@ require (
 	github.com/jtacoma/uritemplates v1.0.0
 	github.com/lestrrat-go/jwx/v2 v2.1.6
 	github.com/prometheus/client_golang v1.23.0
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.0
 	github.com/xmidt-org/chronon v0.1.4
 	github.com/xmidt-org/touchstone v0.1.7
 	go.uber.org/multierr v1.11.0
