@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/jtacoma/uritemplates v1.0.0
 	github.com/lestrrat-go/jwx/v2 v2.1.6
-	github.com/prometheus/client_golang v1.23.1
+	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	github.com/xmidt-org/chronon v0.1.4
 	github.com/xmidt-org/touchstone v0.1.7
@@ -15,11 +15,10 @@ require (
 )
 
 require (
-	github.com/grafana/regexp v0.0.0-20240518133315-a468a5bfb3bc // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/segmentio/asm v1.2.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 )
 
 require (
@@ -36,7 +35,7 @@ require (
 	github.com/lestrrat-go/option v1.0.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.66.0 // indirect
+	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.uber.org/dig v1.19.0 // indirect
