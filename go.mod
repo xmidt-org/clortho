@@ -1,6 +1,6 @@
 module github.com/xmidt-org/clortho
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/jtacoma/uritemplates v1.0.0
@@ -40,8 +40,8 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.uber.org/dig v1.19.0 // indirect
 	go.uber.org/fx v1.24.0
-	golang.org/x/crypto v0.32.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
