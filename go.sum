@@ -60,8 +60,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/xmidt-org/chronon v0.1.9 h1:HSYBMo3fw7MNR3sifvDEXd0xjpPC54K4pWIF8zVbN40=
 github.com/xmidt-org/chronon v0.1.9/go.mod h1:KYdgUzy0q+sv7Zp5mXo22oam8zRVRvzv36MlJeRY+vc=
-github.com/xmidt-org/touchstone v0.1.7 h1:gi3uXLDhXONe+vdVAa9xQBucMD/tJ74NMER2Lw2lo7U=
-github.com/xmidt-org/touchstone v0.1.7/go.mod h1:cuukL7BhuCX6OIEhDymFnR5mRw3wBwKFdNUOzMYxE20=
+github.com/xmidt-org/touchstone v0.1.8 h1:jpA7j2pPtuP6hFr/LcT25cvfYkztWOp3Tj1ZCvqIvMw=
+github.com/xmidt-org/touchstone v0.1.8/go.mod h1:3nKZJlgWCDDThy/djXF2/wiwmRyCcDBSWBrSuUSy3ME=
 go.uber.org/dig v1.19.0 h1:BACLhebsYdpQ7IROQ1AGPjrXcP5dF80U3gKoFzbaq/4=
 go.uber.org/dig v1.19.0/go.mod h1:Us0rSJiThwCv2GteUN0Q7OKvU7n5J4dxZ9JKUXozFdE=
 go.uber.org/fx v1.24.0 h1:wE8mruvpg2kiiL1Vqd0CC+tr0/24XIB10Iwp2lLWzkg=

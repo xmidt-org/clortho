@@ -8,7 +8,7 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	github.com/xmidt-org/chronon v0.1.9
-	github.com/xmidt-org/touchstone v0.1.7
+	github.com/xmidt-org/touchstone v0.1.8
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.1
 	gopkg.in/h2non/gock.v1 v1.1.2
