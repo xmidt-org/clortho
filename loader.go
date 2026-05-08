@@ -280,6 +280,12 @@ func (hl HTTPLoader) LoadContent(ctx context.Context, location string, meta Cont
 	if err != nil {
 		return nil, meta, err
 	}
+	defer func() {
+		if response != nil && response.Body != nil {
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+		}
+	}()
 
 	return data, hl.newMeta(response), nil
 }
