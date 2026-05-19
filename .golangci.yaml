@@ -26,6 +26,9 @@ linters:
       excludes:
         # don't check math/rand vs crypto/rand
         - G404
+    staticcheck:
+      checks:
+        - '-ST1005'
   exclusions:
     generated: lax
     presets:

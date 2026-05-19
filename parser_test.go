@@ -16,6 +16,7 @@ import (
 
 const (
 	// singlePEM is a single 2048-bit RSA key in PEM format
+	//nolint:gosec // G101: Test fixture, not real credentials
 	singlePEM = `
 -----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEA20Ni+ma3vPIJuRkieFIHOQfl+OySVruUGJE59x+FHzmyOfP5
@@ -47,6 +48,7 @@ Tb//37rP+cKKAyjm6yPpP29p2R3D6zRqRtxc0RLBfzAqVM6D8M8+7Q==
 
 	// listPEM is a list of (2) keys:  the same key as singleRSAPEM
 	// and a EC key on P-256.
+	//nolint:gosec // G101: Test fixture, not real credentials
 	listPEM = `
 -----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEA20Ni+ma3vPIJuRkieFIHOQfl+OySVruUGJE59x+FHzmyOfP5
