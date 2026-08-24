@@ -7,7 +7,7 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.1.7
 	github.com/prometheus/client_golang v1.24.1
 	github.com/stretchr/testify v1.12.1
-	github.com/xmidt-org/chronon v0.1.14
+	github.com/xmidt-org/chronon v0.1.15
 	github.com/xmidt-org/touchstone v0.1.8
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.28.0
