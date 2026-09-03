@@ -52,7 +52,7 @@ type ResolveListener interface {
 // Expander is the strategy for expanding a URI template.
 type Expander interface {
 	// Expand takes a value map and returns the URI resulting from that expansion.
-	Expand(interface{}) (string, error)
+	Expand(any) (string, error)
 }
 
 // NewExpander constructs an Expander from a URI template.
@@ -88,7 +88,7 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 	}
 
 	if r.fetcher == nil {
-		r.fetcher, _ = NewFetcher()
+		r.fetcher = NewFetcher()
 	}
 
 	if r.keyIDExpander == nil {
@@ -153,7 +153,7 @@ type resolver struct {
 }
 
 func (r *resolver) dispatch(event ResolveEvent) {
-	r.listeners.visit(func(l interface{}) {
+	r.listeners.visit(func(l any) {
 		l.(ResolveListener).OnResolveEvent(event)
 	})
 }
@@ -183,13 +183,13 @@ func (r *resolver) waitForKey(ctx context.Context, request *pendingResolverReque
 }
 
 func (r *resolver) fetchKey(ctx context.Context, keyID string, request *pendingResolverRequest) (location string, k Key, err error) {
-	location, err = r.keyIDExpander.Expand(map[string]interface{}{
+	location, err = r.keyIDExpander.Expand(map[string]any{
 		KeyIDParameterName: keyID,
 	})
 
 	var keys []Key
 	if err == nil {
-		keys, _, err = r.fetcher.Fetch(ctx, location, ContentMeta{})
+		keys, _, err = r.fetcher.Fetch(ctx, location)
 	}
 
 	if err == nil {

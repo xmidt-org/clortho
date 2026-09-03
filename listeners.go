@@ -35,7 +35,7 @@ func (l *listeners) cancelListener(e *list.Element) CancelListenerFunc {
 
 // addListener inserts a new listener into the list and returns a closure
 // that will remove the listener from the list.
-func (l *listeners) addListener(newListener interface{}) CancelListenerFunc {
+func (l *listeners) addListener(newListener any) CancelListenerFunc {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 
@@ -49,7 +49,7 @@ func (l *listeners) addListener(newListener interface{}) CancelListenerFunc {
 
 // visit applies the given closure to each listener in the list.  This method
 // is atomic with respect to addListener.
-func (l *listeners) visit(f func(interface{})) {
+func (l *listeners) visit(f func(any)) {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 

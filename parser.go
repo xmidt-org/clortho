@@ -77,45 +77,32 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 // A caller can use WithFormats to change the parser associated with a format or
 // to register a Parser for a new, custom format.
 func NewParser(options ...ParserOption) (Parser, error) {
-	var (
-		err error
+	ps := defaultParser()
 
-		jsp = JWKSetParser{}
-
-		jp = JWKKeyParser{}
-
-		usePEM = JWKSetParser{
-			Options: []jwk.ParseOption{
-				jwk.WithPEM(true),
-			},
-		}
-
-		ps = &parsers{
-			p: map[string]Parser{
-				SuffixPEM:    usePEM,
-				MediaTypePEM: usePEM,
-
-				SuffixJSON:    jsp,
-				MediaTypeJSON: jsp,
-
-				SuffixJWK:    jp,
-				MediaTypeJWK: jp,
-
-				SuffixJWKSet:    jsp,
-				MediaTypeJWKSet: jsp,
-			},
-		}
-	)
-
+	var errs error
 	for _, o := range options {
-		err = multierr.Append(err, o.applyToParsers(ps))
+		errs = multierr.Append(errs, o.applyToParsers(ps))
 	}
 
-	if err != nil {
-		ps = nil
-	}
+	return ps, errs
+}
 
-	return ps, err
+func defaultParser() *parsers {
+	return &parsers{
+		p: map[string]Parser{
+			SuffixPEM:    JWKSetParser{Options: []jwk.ParseOption{jwk.WithPEM(true)}},
+			MediaTypePEM: JWKSetParser{Options: []jwk.ParseOption{jwk.WithPEM(true)}},
+
+			SuffixJSON:    JWKSetParser{},
+			MediaTypeJSON: JWKSetParser{},
+
+			SuffixJWK:    JWKKeyParser{},
+			MediaTypeJWK: JWKKeyParser{},
+
+			SuffixJWKSet:    JWKSetParser{},
+			MediaTypeJWKSet: JWKSetParser{},
+		},
+	}
 }
 
 // JWKKeyParser parses content as a single JWK.

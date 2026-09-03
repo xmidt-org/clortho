@@ -86,39 +86,36 @@ func WithFormats(p Parser, formats ...string) ParserOption {
 
 // FetcherOption is a configuration option passed to NewFetcher.
 type FetcherOption interface {
-	applyToFetcher(*fetcher) error
+	applyToFetcher(*fetcher)
 }
 
-type fetcherOptionFunc func(*fetcher) error
+type fetcherOptionFunc func(*fetcher)
 
-func (fof fetcherOptionFunc) applyToFetcher(f *fetcher) error {
-	return fof(f)
+func (fof fetcherOptionFunc) applyToFetcher(f *fetcher) {
+	fof(f)
 }
 
 // WithLoader defines the Loader strategy for a Fetcher.  By default,
 // a Fetcher uses a Loader created with no options.
 func WithLoader(l Loader) FetcherOption {
-	return fetcherOptionFunc(func(f *fetcher) error {
+	return fetcherOptionFunc(func(f *fetcher) {
 		f.loader = l
-		return nil
 	})
 }
 
 // WithParser defines the Parser strategy for a Fetcher.  By default,
 // a Fetcher uses a Parser created with no options.
 func WithParser(p Parser) FetcherOption {
-	return fetcherOptionFunc(func(f *fetcher) error {
+	return fetcherOptionFunc(func(f *fetcher) {
 		f.parser = p
-		return nil
 	})
 }
 
 // WithKeyIDHash sets the cryptographic hash used to generate key IDs for keys
 // which do not have them.  By default, crypto.SHA256 is used.
 func WithKeyIDHash(h crypto.Hash) FetcherOption {
-	return fetcherOptionFunc(func(f *fetcher) error {
+	return fetcherOptionFunc(func(f *fetcher) {
 		f.keyIDHash = h
-		return nil
 	})
 }
 
