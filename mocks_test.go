@@ -13,15 +13,15 @@ type mockLoader struct {
 	mock.Mock
 }
 
-func (m *mockLoader) LoadContent(ctx context.Context, location string, meta ContentMeta) ([]byte, ContentMeta, error) {
-	args := m.Called(ctx, location, meta)
+func (m *mockLoader) LoadContent(ctx context.Context, location string) ([]byte, ContentMeta, error) {
+	args := m.Called(ctx, location)
 	return args.Get(0).([]byte),
 		args.Get(1).(ContentMeta),
 		args.Error(2)
 }
 
-func (m *mockLoader) ExpectLoadContent(ctx context.Context, location string, meta ContentMeta) *mock.Call {
-	return m.On("LoadContent", ctx, location, meta)
+func (m *mockLoader) ExpectLoadContent(ctx context.Context, location string) *mock.Call {
+	return m.On("LoadContent", ctx, location)
 }
 
 type mockParser struct {
@@ -42,19 +42,19 @@ type mockFetcher struct {
 	mock.Mock
 }
 
-func (m *mockFetcher) Fetch(ctx context.Context, location string, prev ContentMeta) ([]Key, ContentMeta, error) {
-	args := m.Called(ctx, location, prev)
+func (m *mockFetcher) Fetch(ctx context.Context, location string) ([]Key, ContentMeta, error) {
+	args := m.Called(ctx, location)
 	return args.Get(0).([]Key),
 		args.Get(1).(ContentMeta),
 		args.Error(2)
 }
 
-func (m *mockFetcher) ExpectFetch(ctx context.Context, location string, prev ContentMeta) *mock.Call {
-	return m.On("Fetch", ctx, location, prev)
+func (m *mockFetcher) ExpectFetch(ctx context.Context, location string) *mock.Call {
+	return m.On("Fetch", ctx, location)
 }
 
-func (m *mockFetcher) ExpectFetchCtx(ctx func(context.Context) bool, location string, prev ContentMeta) *mock.Call {
-	return m.On("Fetch", mock.MatchedBy(ctx), location, prev)
+func (m *mockFetcher) ExpectFetchCtx(ctx func(context.Context) bool, location string) *mock.Call {
+	return m.On("Fetch", mock.MatchedBy(ctx), location)
 }
 
 type mockResolveListener struct {

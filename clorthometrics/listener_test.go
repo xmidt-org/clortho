@@ -16,6 +16,8 @@ import (
 )
 
 const (
+	testURL = "https://example.com"
+
 	// keys is a jwk set used to stand-in for an event's Keys field
 	keys = `{
     "keys": [
@@ -100,7 +102,7 @@ func (suite *ListenerSuite) testOnRefreshEventSuccess() {
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
 		expectedLabels            = prometheus.Labels{
-			SourceLabel: "https://getkeys.com",
+			SourceLabel: testURL,
 		}
 
 		assert = touchtest.New(suite.T())
@@ -111,7 +113,7 @@ func (suite *ListenerSuite) testOnRefreshEventSuccess() {
 	assert.Expect(expected)
 
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
-		URI:  "https://getkeys.com",
+		URI:  testURL,
 		Keys: suite.keys,
 	})
 
@@ -126,7 +128,7 @@ func (suite *ListenerSuite) testOnRefreshEventError() {
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
 		expectedLabels            = prometheus.Labels{
-			SourceLabel: "https://getkeys.com",
+			SourceLabel: testURL,
 		}
 
 		assert = touchtest.New(suite.T())
@@ -138,7 +140,7 @@ func (suite *ListenerSuite) testOnRefreshEventError() {
 	assert.Expect(expected)
 
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
-		URI:  "https://getkeys.com",
+		URI:  testURL,
 		Err:  errors.New("expected"),
 		Keys: suite.keys,
 	})
@@ -159,8 +161,9 @@ func (suite *ListenerSuite) testOnResolveEventSuccess() {
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
 		expectedLabels            = prometheus.Labels{
-			SourceLabel: "https://getkeys.com",
-			KeyIDLabel:  "test",
+			SourceLabel: testURL,
+			// nolint: goconst
+			KeyIDLabel: "test",
 		}
 
 		assert = touchtest.New(suite.T())
@@ -170,7 +173,7 @@ func (suite *ListenerSuite) testOnResolveEventSuccess() {
 	assert.Expect(expected)
 
 	actualListener.OnResolveEvent(clortho.ResolveEvent{
-		URI:   "https://getkeys.com",
+		URI:   testURL,
 		KeyID: "test",
 	})
 
@@ -185,7 +188,7 @@ func (suite *ListenerSuite) testOnResolveEventError() {
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
 		expectedLabels            = prometheus.Labels{
-			SourceLabel: "https://getkeys.com",
+			SourceLabel: testURL,
 			KeyIDLabel:  "test",
 		}
 
@@ -197,7 +200,7 @@ func (suite *ListenerSuite) testOnResolveEventError() {
 	assert.Expect(expected)
 
 	actualListener.OnResolveEvent(clortho.ResolveEvent{
-		URI:   "https://getkeys.com",
+		URI:   testURL,
 		KeyID: "test",
 		Err:   errors.New("expected"),
 	})

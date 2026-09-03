@@ -15,6 +15,8 @@ import (
 )
 
 const (
+	testURL = "https://example.com"
+
 	// jwkFetchSet is a copy of jwkSet with the second key having no kid.
 	// this tests that the fetcher correctly guarantees key IDs.
 	jwkFetchSet = `{
@@ -47,9 +49,9 @@ type FetcherSuite struct {
 }
 
 func (suite *FetcherSuite) newFetcher(options ...FetcherOption) Fetcher {
-	f, err := NewFetcher(options...)
-	suite.Require().NoError(err)
+	f := NewFetcher(options...)
 	suite.Require().NotNil(f)
+
 	return f
 }
 
@@ -74,11 +76,11 @@ func (suite *FetcherSuite) TestLoaderError() {
 		f, l, p       = suite.newFetcherWithMocks()
 	)
 
-	l.ExpectLoadContent(context.Background(), "http://getkeys.com", ContentMeta{}).
+	l.ExpectLoadContent(context.Background(), testURL).
 		Return([]byte{}, ContentMeta{}, expectedError).
 		Once()
 
-	keys, meta, err := f.Fetch(context.Background(), "http://getkeys.com", ContentMeta{})
+	keys, meta, err := f.Fetch(context.Background(), testURL)
 	suite.Empty(keys)
 	suite.Equal(ContentMeta{}, meta)
 	suite.ErrorIs(err, expectedError)
@@ -93,17 +95,17 @@ func (suite *FetcherSuite) TestParserError() {
 		f, l, p       = suite.newFetcherWithMocks()
 	)
 
-	l.ExpectLoadContent(context.Background(), "http://getkeys.com", ContentMeta{}).
-		Return([]byte("keys"), ContentMeta{Format: MediaTypeJWK}, error(nil)).
+	l.ExpectLoadContent(context.Background(), testURL).
+		Return([]byte("keys"), ContentMeta{Format: MediaTypeJWK}, nil).
 		Once()
 
 	p.ExpectParse(MediaTypeJWK, []byte("keys")).
 		Return([]Key{}, expectedError).
 		Once()
 
-	keys, meta, err := f.Fetch(context.Background(), "http://getkeys.com", ContentMeta{})
+	keys, meta, err := f.Fetch(context.Background(), testURL)
 	suite.Empty(keys)
-	suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+	suite.Equal(ContentMeta{}, meta)
 	suite.ErrorIs(err, expectedError)
 
 	l.AssertExpectations(suite.T())
@@ -121,15 +123,15 @@ func (suite *FetcherSuite) testFetch(extra ...FetcherOption) {
 	suite.Require().Len(parsedKeys, 2)
 	suite.Require().NoError(err)
 
-	l.ExpectLoadContent(context.Background(), "http://getkeys.com", ContentMeta{}).
-		Return([]byte(jwkFetchSet), ContentMeta{Format: MediaTypeJWKSet}, error(nil)).
+	l.ExpectLoadContent(context.Background(), testURL).
+		Return([]byte(jwkFetchSet), ContentMeta{Format: MediaTypeJWKSet}, nil).
 		Once()
 
 	p.ExpectParse(MediaTypeJWKSet, []byte(jwkFetchSet)).
-		Return(parsedKeys, error(nil)).
+		Return(parsedKeys, nil).
 		Once()
 
-	keys, meta, err := f.Fetch(context.Background(), "http://getkeys.com", ContentMeta{})
+	keys, meta, err := f.Fetch(context.Background(), testURL)
 	suite.Require().NoError(err)
 	suite.Equal(ContentMeta{Format: MediaTypeJWKSet}, meta)
 	suite.Require().Len(keys, 2)
@@ -156,6 +158,15 @@ func (suite *FetcherSuite) TestFetch() {
 // TestDefault just verifies the default setup.  We'll be verifying behavior with
 // mocks elsewhere.
 func (suite *FetcherSuite) TestDefault() {
+	f := suite.newFetcher()
+	suite.Require().IsType((*fetcher)(nil), f)
+
+	suite.NotNil(f.(*fetcher).loader)
+	suite.NotNil(f.(*fetcher).parser)
+	suite.Equal(crypto.SHA256, f.(*fetcher).keyIDHash)
+}
+
+func (suite *FetcherSuite) TestDefaultError() {
 	f := suite.newFetcher()
 	suite.Require().IsType((*fetcher)(nil), f)
 

@@ -59,7 +59,7 @@ func (suite *ProvideSuite) TestDefaults() {
 	// TODO: how best to test the refresher here?
 
 	key, err := resolver.Resolve(
-		context.Background(),
+		clortho.SetContentMeta(context.Background(), clortho.ContentMeta{}),
 		"test",
 	)
 

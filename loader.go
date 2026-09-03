@@ -281,6 +281,8 @@ func (hl HTTPLoader) LoadContent(ctx context.Context, location string) ([]byte, 
 		return nil, ContentMeta{}, err
 	}
 
+	// nolint: bodyclose
+	// Body already closed in hl.transact
 	resp, data, err := hl.transact(req)
 	if err != nil {
 		return nil, ContentMeta{}, err

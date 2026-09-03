@@ -20,10 +20,10 @@ const (
 
 var (
 	// ErrNoTemplate indicates that no URI template is available for that Resolver's method.
-	ErrNoTemplate = errors.New("No URI template expander has been configured for that method.")
+	ErrNoTemplate = errors.New("no URI template expander has been configured for that method")
 
 	// ErrKeyNotFound indicates that a key could not be resolved, e.g. a key ID did not exist.
-	ErrKeyNotFound = errors.New("No such key exists")
+	ErrKeyNotFound = errors.New("no such key exists")
 )
 
 // ResolveEvent holds information about a key ID that has been resolved.

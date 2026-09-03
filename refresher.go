@@ -15,10 +15,10 @@ import (
 
 var (
 	// ErrRefresherStarted is returned by Refresher.Start if the Refresher is running.
-	ErrRefresherStarted = errors.New("That refresher has already been started")
+	ErrRefresherStarted = errors.New("that refresher has already been started")
 
 	// ErrRefresherStopped is returned by Refresher.Stop if the Refresher is not running.
-	ErrRefresherStopped = errors.New("That refresher is not running")
+	ErrRefresherStopped = errors.New("that refresher is not running")
 )
 
 // RefreshEvent represents a set of keys from a given URI that has been

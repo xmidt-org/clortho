@@ -16,6 +16,9 @@ import (
 )
 
 const (
+	testURL    = "https://example.com"
+	testFooURL = "https://example.com/foo"
+
 	// keys is a jwk set used to stand-in for an event's Keys field
 	keys = `{
     "keys": [
@@ -124,7 +127,7 @@ func (suite *ListenerSuite) SetupSuite() {
 	suite.Require().Len(suite.deletedKeys, 2)
 }
 
-func (suite *ListenerSuite) unmarshalEntry(b *bytes.Buffer) (m map[string]interface{}) {
+func (suite *ListenerSuite) unmarshalEntry(b *bytes.Buffer) (m map[string]any) {
 	suite.Require().NotEmpty(b.Bytes())
 	suite.Require().NoError(json.Unmarshal(b.Bytes(), &m))
 	return
@@ -192,14 +195,14 @@ func (suite *ListenerSuite) testOnRefreshEventNoError() {
 		{
 			description: "keys only",
 			event: clortho.RefreshEvent{
-				URI:  "http://getkeys.com",
+				URI:  testURL,
 				Keys: suite.keys,
 			},
 		},
 		{
 			description: "keys and new",
 			event: clortho.RefreshEvent{
-				URI:  "http://getkeys.com",
+				URI:  testURL,
 				Keys: suite.keys,
 				New:  suite.newKeys,
 			},
@@ -207,7 +210,7 @@ func (suite *ListenerSuite) testOnRefreshEventNoError() {
 		{
 			description: "keys and deleted",
 			event: clortho.RefreshEvent{
-				URI:     "http://getkeys.com",
+				URI:     testURL,
 				Keys:    suite.keys,
 				Deleted: suite.deletedKeys,
 			},
@@ -215,7 +218,7 @@ func (suite *ListenerSuite) testOnRefreshEventNoError() {
 		{
 			description: "all",
 			event: clortho.RefreshEvent{
-				URI:     "http://getkeys.com",
+				URI:     testURL,
 				Keys:    suite.keys,
 				New:     suite.newKeys,
 				Deleted: suite.deletedKeys,
@@ -261,7 +264,7 @@ func (suite *ListenerSuite) testOnRefreshEventError() {
 		listener       = suite.newListener(WithLogger(logger))
 
 		event = clortho.RefreshEvent{
-			URI:  "http://badkeys.com",
+			URI:  testURL,
 			Keys: suite.keys,
 			Err:  expectedError,
 		}
@@ -280,7 +283,7 @@ func (suite *ListenerSuite) testOnRefreshEventDisabled() {
 
 	suite.Empty(output.Bytes())
 	listener.OnRefreshEvent(clortho.RefreshEvent{
-		URI: "http://does.not.matter",
+		URI: testURL,
 	})
 
 	suite.Empty(output.Bytes())
@@ -314,7 +317,7 @@ func (suite *ListenerSuite) testOnResolveEventNoError() {
 		listener       = suite.newListener(WithLogger(logger))
 
 		event = clortho.ResolveEvent{
-			URI:   "https://getkeys.com/foo",
+			URI:   testFooURL,
 			KeyID: "foo",
 			// NOTE: we don't use the Key field for logging
 		}
@@ -333,7 +336,7 @@ func (suite *ListenerSuite) testOnResolveEventError() {
 		listener       = suite.newListener(WithLogger(logger))
 
 		event = clortho.ResolveEvent{
-			URI:   "https://getkeys.com/foo",
+			URI:   testFooURL,
 			KeyID: "foo",
 			// NOTE: we don't use the Key field for logging
 			Err: expectedError,
@@ -353,7 +356,7 @@ func (suite *ListenerSuite) testOnResolveEventDisabled() {
 
 	suite.Empty(output.Bytes())
 	listener.OnResolveEvent(clortho.ResolveEvent{
-		URI: "http://does.not.matter",
+		URI: testURL,
 	})
 
 	suite.Empty(output.Bytes())
