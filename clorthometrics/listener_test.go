@@ -101,15 +101,12 @@ func (suite *ListenerSuite) testOnRefreshEventSuccess() {
 
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
-		expectedLabels            = prometheus.Labels{
-			SourceLabel: testURL,
-		}
 
 		assert = touchtest.New(suite.T())
 	)
 
-	expectedListener.refreshTotal.With(expectedLabels).Add(1.0)
-	expectedListener.refreshKeys.With(expectedLabels).Set(float64(len(suite.keys)))
+	expectedListener.refreshTotal.Add(1.0)
+	expectedListener.refreshKeys.Set(float64(len(suite.keys)))
 	assert.Expect(expected)
 
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
@@ -127,16 +124,13 @@ func (suite *ListenerSuite) testOnRefreshEventError() {
 
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
-		expectedLabels            = prometheus.Labels{
-			SourceLabel: testURL,
-		}
 
 		assert = touchtest.New(suite.T())
 	)
 
-	expectedListener.refreshTotal.With(expectedLabels).Add(1.0)
-	expectedListener.refreshErrorTotal.With(expectedLabels).Add(1.0)
-	expectedListener.refreshKeys.With(expectedLabels).Set(float64(len(suite.keys)))
+	expectedListener.refreshTotal.Add(1.0)
+	expectedListener.refreshErrorTotal.Add(1.0)
+	expectedListener.refreshKeys.Set(float64(len(suite.keys)))
 	assert.Expect(expected)
 
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
@@ -160,16 +154,11 @@ func (suite *ListenerSuite) testOnResolveEventSuccess() {
 
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
-		expectedLabels            = prometheus.Labels{
-			SourceLabel: testURL,
-			// nolint: goconst
-			KeyIDLabel: "test",
-		}
 
 		assert = touchtest.New(suite.T())
 	)
 
-	expectedListener.resolveTotal.With(expectedLabels).Add(1.0)
+	expectedListener.resolveTotal.Add(1.0)
 	assert.Expect(expected)
 
 	actualListener.OnResolveEvent(clortho.ResolveEvent{
@@ -187,16 +176,12 @@ func (suite *ListenerSuite) testOnResolveEventError() {
 
 		expected, expectedFactory = suite.newFactory()
 		expectedListener          = suite.newListener(expectedFactory)
-		expectedLabels            = prometheus.Labels{
-			SourceLabel: testURL,
-			KeyIDLabel:  "test",
-		}
 
 		assert = touchtest.New(suite.T())
 	)
 
-	expectedListener.resolveTotal.With(expectedLabels).Add(1.0)
-	expectedListener.resolveErrorTotal.With(expectedLabels).Add(1.0)
+	expectedListener.resolveTotal.Add(1.0)
+	expectedListener.resolveErrorTotal.Add(1.0)
 	assert.Expect(expected)
 
 	actualListener.OnResolveEvent(clortho.ResolveEvent{

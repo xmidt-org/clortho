@@ -55,54 +55,47 @@ const (
 	KeyIDLabel = "keyID"
 )
 
-func newRefreshTotal(f *touchstone.Factory) (m *prometheus.CounterVec, err error) {
-	return f.NewCounterVec(
+func newRefreshTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
+	return f.NewCounter(
 		prometheus.CounterOpts{
 			Name: RefreshTotalName,
 			Help: RefreshTotalHelp,
 		},
-		SourceLabel,
 	)
 }
 
-func newRefreshKeys(f *touchstone.Factory) (m *prometheus.GaugeVec, err error) {
-	return f.NewGaugeVec(
+func newRefreshKeys(f *touchstone.Factory) (m prometheus.Gauge, err error) {
+	return f.NewGauge(
 		prometheus.GaugeOpts{
 			Name: RefreshKeysName,
 			Help: RefreshKeysHelp,
 		},
-		SourceLabel,
 	)
 }
 
-func newRefreshErrorTotal(f *touchstone.Factory) (m *prometheus.CounterVec, err error) {
-	return f.NewCounterVec(
+func newRefreshErrorTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
+	return f.NewCounter(
 		prometheus.CounterOpts{
 			Name: RefreshErrorTotalName,
 			Help: RefreshErrorTotalHelp,
 		},
-		SourceLabel,
 	)
 }
 
-func newResolveTotal(f *touchstone.Factory) (m *prometheus.CounterVec, err error) {
-	return f.NewCounterVec(
+func newResolveTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
+	return f.NewCounter(
 		prometheus.CounterOpts{
 			Name: ResolveTotalName,
 			Help: ResolveTotalHelp,
 		},
-		SourceLabel,
-		KeyIDLabel,
 	)
 }
 
-func newResolveErrorTotal(f *touchstone.Factory) (m *prometheus.CounterVec, err error) {
-	return f.NewCounterVec(
+func newResolveErrorTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
+	return f.NewCounter(
 		prometheus.CounterOpts{
 			Name: ResolveErrorTotalName,
 			Help: ResolveErrorTotalHelp,
 		},
-		SourceLabel,
-		KeyIDLabel,
 	)
 }
