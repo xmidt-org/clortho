@@ -45,7 +45,7 @@ type Key interface {
 
 	// Raw is the raw key, e.g. *rsa.PublicKey, *rsa.PrivateKey, etc.  This is the actual underlying
 	// cryptographic key that should be used.
-	Raw() interface{}
+	Raw() any
 
 	// Public is the public portion of the raw key.  If this key is already a public key, this method
 	// returns the same key as Raw.
@@ -57,14 +57,14 @@ type key struct {
 	keyID    string
 	keyType  string
 	keyUsage string
-	raw      interface{}
+	raw      any
 	public   crypto.PublicKey
 }
 
 func (k *key) KeyID() string            { return k.keyID }
 func (k *key) KeyType() string          { return k.keyType }
 func (k *key) KeyUsage() string         { return k.keyUsage }
-func (k *key) Raw() interface{}         { return k.raw }
+func (k *key) Raw() any                 { return k.raw }
 func (k *key) Public() crypto.PublicKey { return k.public }
 func (k *key) String() string           { return k.keyID }
 

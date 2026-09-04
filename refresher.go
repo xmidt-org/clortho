@@ -15,10 +15,10 @@ import (
 
 var (
 	// ErrRefresherStarted is returned by Refresher.Start if the Refresher is running.
-	ErrRefresherStarted = errors.New("That refresher has already been started")
+	ErrRefresherStarted = errors.New("that refresher has already been started")
 
 	// ErrRefresherStopped is returned by Refresher.Stop if the Refresher is not running.
-	ErrRefresherStopped = errors.New("That refresher is not running")
+	ErrRefresherStopped = errors.New("that refresher is not running")
 )
 
 // RefreshEvent represents a set of keys from a given URI that has been
@@ -95,7 +95,7 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	}
 
 	if r.fetcher == nil {
-		r.fetcher, _ = NewFetcher()
+		r.fetcher = NewFetcher()
 	}
 
 	err = multierr.Append(err, validateRefreshSources(r.sources...))
@@ -140,7 +140,7 @@ func (r *refresher) Start(_ context.Context) error {
 			}
 		)
 
-		go task.run(taskCtx)
+		go task.run(SetContentMeta(taskCtx, ContentMeta{}))
 		tasks = append(tasks, task)
 	}
 
@@ -170,7 +170,7 @@ func (r *refresher) AddListener(l RefreshListener) CancelListenerFunc {
 }
 
 func (r *refresher) dispatch(event RefreshEvent) {
-	r.listeners.visit(func(l interface{}) {
+	r.listeners.visit(func(l any) {
 		l.(RefreshListener).OnRefreshEvent(event)
 	})
 }
@@ -215,53 +215,32 @@ func (rt *refreshTask) run(ctx context.Context) {
 	var (
 		prevKeys   []Key
 		prevKeyMap map[string]Key
-		prevMeta   ContentMeta
 	)
 
 	for {
-		nextKeys, nextMeta, err := rt.fetcher.Fetch(ctx, rt.source.URI, prevMeta)
-		event := RefreshEvent{
-			URI: rt.source.URI,
-			Err: err,
-		}
-
-		switch {
-		case ctx.Err() != nil:
-			// we were asked to shutdown, and this interrupted the fetch
-			// we can't inspect err for this, because a child context may have
-			// been used for the underlying operation, e.g. HTTP request
-			return
-
-		case err == nil:
+		event := RefreshEvent{URI: rt.source.URI}
+		nextKeys, meta, err := rt.fetcher.Fetch(ctx, rt.source.URI)
+		next := rt.jitterer.nextInterval(ContentMeta{}, err)
+		if err == nil {
 			nextKeyMap := rt.newKeyMap(nextKeys)
-
-			event.Keys = make([]Key, len(nextKeys))
-			copy(event.Keys, nextKeys)
 			event.New, event.Deleted = rt.findChanges(nextKeyMap, prevKeyMap)
+			ctx = SetContentMeta(ctx, meta)
+			next = rt.jitterer.nextInterval(meta, nil)
 
+			// send out the next keys
 			prevKeys = nextKeys
 			prevKeyMap = nextKeyMap
-			prevMeta = nextMeta
-
-		case err != nil:
-			// reset the content metadata
-			prevMeta = ContentMeta{}
-
-			// send out the previous keys, and leave New/Deleted unset
-			event.Keys = make([]Key, len(prevKeys))
-			copy(event.Keys, prevKeys)
 		}
 
+		event.Err = err
+		event.Keys = make([]Key, len(prevKeys))
+		copy(event.Keys, prevKeys)
 		sort.Sort(event.Keys)
 		sort.Sort(event.New)
 		sort.Sort(event.Deleted)
 		rt.dispatch(event)
 
-		var (
-			next  = rt.jitterer.nextInterval(prevMeta, err)
-			timer = rt.clock.NewTimer(next)
-		)
-
+		timer := rt.clock.NewTimer(next)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

@@ -59,7 +59,7 @@ type RefreshSource struct {
 // validate checks that this RefreshSource is valid.
 func (rs RefreshSource) validate() (err error) {
 	if len(rs.URI) == 0 {
-		err = errors.New("A URI is required for each refresh source")
+		err = errors.New("a URI is required for each refresh source")
 	}
 
 	return
@@ -72,7 +72,7 @@ func validateRefreshSources(in ...RefreshSource) (err error) {
 		err = multierr.Append(err, s.validate())
 
 		if _, ok := duplicates[s.URI]; ok {
-			err = multierr.Append(err, fmt.Errorf("Duplicate refresh source URI: '%s'", s.URI))
+			err = multierr.Append(err, fmt.Errorf("duplicate refresh source URI: '%s'", s.URI))
 			continue
 		}
 

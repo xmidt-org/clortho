@@ -22,44 +22,10 @@ func newKeyRing() clortho.KeyRing {
 	return clortho.NewKeyRing()
 }
 
-// FetcherIn specifies the components that the clortho.Fetcher component depends upon.
-type FetcherIn struct {
-	fx.In
-
-	// FetcherOptions is the optional slice of options used to create the clortho.Fetcher.
-	FetcherOptions []clortho.FetcherOption `optional:"true"`
-
-	// Parser is the optional clortho.Parser used to tailor how key material is parsed.
-	// This will override any parser described in FetcherOptions.
-	//
-	// If no parser is injected, the clortho.Fetcher component will use a default
-	// parser created via clortho.NewParser().
-	Parser clortho.Parser `optional:"true"`
-
-	// Loader is the optional clortho.Loader used to tailor how key material is loaded.
-	// This will override any loader described in FetcherOptions.
-	//
-	// If no loader is injected, the clortho.Fetcher component will use a default
-	// loader created via clortho.NewLoader().
-	Loader clortho.Loader `optional:"true"`
-}
-
 // newFetcher takes the set of injected components and produces a clortho.Fetcher.
-func newFetcher(in FetcherIn) (clortho.Fetcher, error) {
-	options := append(
-		[]clortho.FetcherOption{},
-		in.FetcherOptions...,
-	)
+func newFetcher(opts ...clortho.FetcherOption) clortho.Fetcher {
 
-	if in.Parser != nil {
-		options = append(options, clortho.WithParser(in.Parser))
-	}
-
-	if in.Loader != nil {
-		options = append(options, clortho.WithParser(in.Parser))
-	}
-
-	return clortho.NewFetcher(options...)
+	return clortho.NewFetcher(opts...)
 }
 
 // ZapIn holds the set of dependencies for creating a *clorthozap.Listener.

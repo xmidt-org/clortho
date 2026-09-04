@@ -7,6 +7,7 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.1.7
 	github.com/prometheus/client_golang v1.24.1
 	github.com/stretchr/testify v1.12.1
+	github.com/xmidt-org/arrange v0.5.10
 	github.com/xmidt-org/chronon v0.1.15
 	github.com/xmidt-org/touchstone v0.1.8
 	go.uber.org/multierr v1.11.0
@@ -18,6 +19,7 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
+	github.com/xmidt-org/httpaux v0.4.5 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 )
 

@@ -14,37 +14,24 @@ import (
 // Fetcher handles fetching keys from URI locations.  This is the typical application-layer interface.
 // Generally, clients should use this interface over Loader and Parser.
 type Fetcher interface {
-	// Fetch grabs keys from a URI.  The prev ContentMeta may either be an empty struct, e.g. ContentMeta{},
-	// or the ContentMeta from a previous call to Fetch.
-	//
 	// This method ensures that each key has a key ID.  For keys that do not have a key ID from their source,
 	// a key ID is generated using a thumbprint hash.
-	Fetch(ctx context.Context, location string, prev ContentMeta) (keys []Key, next ContentMeta, err error)
+	Fetch(ctx context.Context, location string) (keys []Key, metadata ContentMeta, err error)
 }
 
 // NewFetcher produces a Fetcher from a set of configuration options.
-func NewFetcher(options ...FetcherOption) (Fetcher, error) {
-	var (
-		err error
-
-		f = &fetcher{
-			keyIDHash: crypto.SHA256,
-		}
-	)
+func NewFetcher(options ...FetcherOption) Fetcher {
+	f := fetcher{
+		keyIDHash: crypto.SHA256,
+		loader:    defaultLoader(),
+		parser:    defaultParser(),
+	}
 
 	for _, o := range options {
-		err = multierr.Append(err, o.applyToFetcher(f))
+		o.applyToFetcher(&f)
 	}
 
-	if f.loader == nil {
-		f.loader, _ = NewLoader()
-	}
-
-	if f.parser == nil {
-		f.parser, _ = NewParser()
-	}
-
-	return f, err
+	return &f
 }
 
 // fetcher is the internal Fetcher implementation.
@@ -54,19 +41,27 @@ type fetcher struct {
 	keyIDHash crypto.Hash
 }
 
-func (f *fetcher) Fetch(ctx context.Context, location string, prev ContentMeta) (keys []Key, next ContentMeta, err error) {
-	var data []byte
-	data, next, err = f.loader.LoadContent(ctx, location, prev)
-
-	if err == nil {
-		keys, err = f.parser.Parse(next.Format, data)
+func (f *fetcher) Fetch(ctx context.Context, location string) ([]Key, ContentMeta, error) {
+	data, nextMeta, err := f.loader.LoadContent(ctx, location)
+	if err != nil {
+		return nil, ContentMeta{}, err
 	}
 
+	keys, err := f.parser.Parse(nextMeta.Format, data)
+	if err != nil {
+		return nil, ContentMeta{}, err
+	}
+
+	var errs error
 	for i, k := range keys {
 		updated, hashErr := EnsureKeyID(k, f.keyIDHash)
 		keys[i] = updated
-		err = multierr.Append(err, hashErr)
+		errs = multierr.Append(errs, hashErr)
 	}
 
-	return
+	if errs != nil {
+		return nil, ContentMeta{}, err
+	}
+
+	return keys, nextMeta, nil
 }

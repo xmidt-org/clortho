@@ -23,8 +23,8 @@ type jitterer struct {
 }
 
 // newJitterer constructs a jitterer for a RefreshSource.
-func newJitterer(source RefreshSource) (j jitterer) {
-	j = jitterer{
+func newJitterer(source RefreshSource) jitterer {
+	j := jitterer{
 		minInterval: source.MinInterval,
 		jitter:      source.Jitter,
 	}
@@ -48,7 +48,7 @@ func newJitterer(source RefreshSource) (j jitterer) {
 	j.intervalRange = int64((1.0+j.jitter)*float64(interval)) - j.intervalBase + 1
 	j.ttlBaseMultiplier = 1.0 - (2.0 * j.jitter)
 
-	return
+	return j
 }
 
 // nextInterval calculates the next refresh interval given metadata and

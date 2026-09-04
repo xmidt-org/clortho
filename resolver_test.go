@@ -14,6 +14,8 @@ import (
 )
 
 const (
+	testKeyIDURL = "https://example.com/{keyID}"
+	testKeyURL   = "https://example.com/testKey"
 
 	// resolverTestKey is a known, good key for testing the Resolver code
 	resolverTestKey = `
@@ -99,7 +101,7 @@ func (suite *ResolverSuite) TestNoKeyIDTemplate() {
 
 func (suite *ResolverSuite) TestDefault() {
 	r := suite.newResolver(
-		WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+		WithKeyIDTemplate(testKeyIDURL),
 	)
 
 	suite.Require().IsType((*resolver)(nil), r)
@@ -111,12 +113,12 @@ func (suite *ResolverSuite) TestSingleKey() {
 		f = new(mockFetcher)
 		r = suite.newResolver(
 			WithFetcher(f),
-			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+			WithKeyIDTemplate(testKeyIDURL),
 		)
 	)
 
-	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
-		Return([]Key{suite.testKey}, ContentMeta{}, error(nil)).
+	f.ExpectFetch(context.Background(), testKeyURL).
+		Return([]Key{suite.testKey}, ContentMeta{}, nil).
 		Twice()
 
 	key, err := r.Resolve(context.Background(), "testKey")
@@ -138,12 +140,12 @@ func (suite *ResolverSuite) TestMultipleKeys() {
 		f = new(mockFetcher)
 		r = suite.newResolver(
 			WithFetcher(f),
-			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+			WithKeyIDTemplate(testKeyIDURL),
 		)
 	)
 
-	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
-		Return(suite.testKeySet, ContentMeta{}, error(nil)).
+	f.ExpectFetch(context.Background(), testKeyURL).
+		Return(suite.testKeySet, ContentMeta{}, nil).
 		Twice()
 
 	key, err := r.Resolve(context.Background(), "testKey")
@@ -169,16 +171,16 @@ func (suite *ResolverSuite) TestWithKeyRing() {
 		r = suite.newResolver(
 			WithKeyRing(keyRing),
 			WithFetcher(f),
-			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+			WithKeyIDTemplate(testKeyIDURL),
 		)
 	)
 
-	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
-		Return(suite.testKeySet, ContentMeta{}, error(nil)).
+	f.ExpectFetch(context.Background(), testKeyURL).
+		Return(suite.testKeySet, ContentMeta{}, nil).
 		Twice()
 
 	listener.ExpectOnResolveEvent(ResolveEvent{
-		URI:   "http://getkeys.com/testKey",
+		URI:   testKeyURL,
 		KeyID: "testKey",
 		Key:   suite.testKey,
 		Err:   nil,
@@ -222,12 +224,12 @@ func (suite *ResolverSuite) TestNoKey() {
 		f = new(mockFetcher)
 		r = suite.newResolver(
 			WithFetcher(f),
-			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+			WithKeyIDTemplate(testKeyIDURL),
 		)
 	)
 
-	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
-		Return([]Key{}, ContentMeta{}, error(nil)).
+	f.ExpectFetch(context.Background(), testKeyURL).
+		Return([]Key{}, ContentMeta{}, nil).
 		Twice()
 
 	key, err := r.Resolve(context.Background(), "testKey")
@@ -247,12 +249,12 @@ func (suite *ResolverSuite) TestMissingKey() {
 		f = new(mockFetcher)
 		r = suite.newResolver(
 			WithFetcher(f),
-			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+			WithKeyIDTemplate(testKeyIDURL),
 		)
 	)
 
-	f.ExpectFetch(context.Background(), "http://getkeys.com/nosuchKey", ContentMeta{}).
-		Return(suite.testKeySet, ContentMeta{}, error(nil)).
+	f.ExpectFetch(context.Background(), "https://example.com/nosuchKey").
+		Return(suite.testKeySet, ContentMeta{}, nil).
 		Once()
 
 	key, err := r.Resolve(context.Background(), "nosuchKey")
@@ -269,11 +271,11 @@ func (suite *ResolverSuite) TestFetcherError() {
 		f = new(mockFetcher)
 		r = suite.newResolver(
 			WithFetcher(f),
-			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+			WithKeyIDTemplate(testKeyIDURL),
 		)
 	)
 
-	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
+	f.ExpectFetch(context.Background(), testKeyURL).
 		Return([]Key{}, ContentMeta{}, expectedError).
 		Once()
 
@@ -298,19 +300,19 @@ func (suite *ResolverSuite) TestConcurrentFetch() {
 		r = suite.newResolver(
 			WithKeyRing(keyRing),
 			WithFetcher(f),
-			WithKeyIDTemplate("http://getkeys.com/{keyID}"),
+			WithKeyIDTemplate(testKeyIDURL),
 		)
 
 		fetchReady = new(sync.WaitGroup)
 		results    = make(chan result, 3)
 	)
 
-	f.ExpectFetch(context.Background(), "http://getkeys.com/testKey", ContentMeta{}).
-		Return([]Key{suite.testKey}, ContentMeta{}, error(nil)).
+	f.ExpectFetch(context.Background(), testKeyURL).
+		Return([]Key{suite.testKey}, ContentMeta{}, nil).
 		Once()
 
 	listener.ExpectOnResolveEvent(ResolveEvent{
-		URI:   "http://getkeys.com/testKey",
+		URI:   testKeyURL,
 		KeyID: "testKey",
 		Key:   suite.testKey,
 		Err:   nil,
@@ -319,7 +321,7 @@ func (suite *ResolverSuite) TestConcurrentFetch() {
 	r.AddListener(listener)
 
 	// spawn several requests, only one of which should actually call the Fetcher
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		fetchReady.Add(1)
 		go func() {
 			fetchReady.Done()
@@ -330,7 +332,7 @@ func (suite *ResolverSuite) TestConcurrentFetch() {
 
 	fetchReady.Wait() // make sure all goroutines have started
 	timeout := time.After(15 * time.Second)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		select {
 		case <-timeout:
 			suite.Fail("Not all resolve calls finished")

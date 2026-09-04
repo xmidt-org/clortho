@@ -158,8 +158,8 @@ func (suite *RefresherSuite) testRefresh(source RefreshSource) {
 	r.AddListener(listener)
 	fc.NotifyOnTimer(timerCh)
 
-	f.ExpectFetchCtx(matchContext, source.URI, ContentMeta{}).
-		Return(suite.set1, ContentMeta{Format: MediaTypeJWKSet}, error(nil)).
+	f.ExpectFetchCtx(matchContext, source.URI).
+		Return(suite.set1, ContentMeta{Format: MediaTypeJWKSet}, nil).
 		Once()
 	listener.ExpectOnRefreshEvent(RefreshEvent{
 		URI:  source.URI,
@@ -167,7 +167,7 @@ func (suite *RefresherSuite) testRefresh(source RefreshSource) {
 		New:  suite.set1, // this is the first event, so everything's new
 	}).Once()
 
-	f.ExpectFetchCtx(matchContext, source.URI, ContentMeta{Format: MediaTypeJWKSet}).
+	f.ExpectFetchCtx(matchContext, source.URI).
 		Return([]Key(nil), ContentMeta{}, expectedError).
 		Once()
 	listener.ExpectOnRefreshEvent(RefreshEvent{
@@ -176,8 +176,8 @@ func (suite *RefresherSuite) testRefresh(source RefreshSource) {
 		Err:  expectedError,
 	}).Once()
 
-	f.ExpectFetchCtx(matchContext, source.URI, ContentMeta{}).
-		Return(suite.set2, ContentMeta{}, error(nil)).
+	f.ExpectFetchCtx(matchContext, source.URI).
+		Return(suite.set2, ContentMeta{}, nil).
 		Once()
 	listener.ExpectOnRefreshEvent(RefreshEvent{
 		URI:     source.URI,
@@ -199,7 +199,7 @@ func (suite *RefresherSuite) testRefresh(source RefreshSource) {
 	timer := suite.getTimer(timerCh)
 
 	// we're expecting (2) more events
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		fc.Set(timer.When())
 		timer = suite.getTimer(timerCh)
 	}
@@ -220,14 +220,14 @@ func (suite *RefresherSuite) testRefresh(source RefreshSource) {
 func (suite *RefresherSuite) TestRefresh() {
 	suite.Run("Default", func() {
 		suite.testRefresh(RefreshSource{
-			URI: "http://getkeys.com/keys",
+			URI: testHTTPSGet,
 			// take the defaults for interval, jitter, etc
 		})
 	})
 
 	suite.Run("CustomInterval", func() {
 		suite.testRefresh(RefreshSource{
-			URI:      "http://getkeys.com/keys",
+			URI:      testHTTPSGet,
 			Interval: 45 * time.Minute,
 			Jitter:   0.15,
 		})
@@ -239,7 +239,7 @@ func (suite *RefresherSuite) TestStopDuringFetch() {
 		f = new(mockFetcher)
 		r = suite.newRefresher(
 			WithFetcher(f),
-			WithSources(RefreshSource{URI: "http://getkeys.com/keys"}),
+			WithSources(RefreshSource{URI: testHTTPSGet}),
 		)
 
 		listener     = new(mockRefreshListener)
@@ -250,8 +250,8 @@ func (suite *RefresherSuite) TestStopDuringFetch() {
 		}
 	)
 
-	f.ExpectFetchCtx(matchContext, "http://getkeys.com/keys", ContentMeta{}).
-		Return(suite.set1, ContentMeta{Format: MediaTypeJWKSet}, error(nil)).
+	f.ExpectFetchCtx(matchContext, testHTTPSGet).
+		Return(suite.set1, ContentMeta{Format: MediaTypeJWKSet}, nil).
 		Run(func(mock.Arguments) {
 			close(fetchReady)
 			<-fetchBarrier
@@ -292,10 +292,10 @@ func (suite *RefresherSuite) TestDuplicateURI() {
 	r, err := NewRefresher(
 		WithSources(
 			RefreshSource{
-				URI: "http://duplicate.net",
+				URI: "https://example.net",
 			},
 			RefreshSource{
-				URI: "http://duplicate.net",
+				URI: "https://example.net",
 			},
 		),
 	)
