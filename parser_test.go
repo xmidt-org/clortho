@@ -10,7 +10,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwa"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -161,14 +161,14 @@ func (suite *ParserSuite) newParser(options ...ParserOption) Parser {
 
 // assertRSAKey runs standard assertions against an RSA private key.
 func (suite *ParserSuite) assertRSAKey(k Key) {
-	suite.Equal(string(jwa.RSA), k.KeyType())
+	suite.Equal(jwa.RSA().String(), k.KeyType())
 	suite.IsType((*rsa.PrivateKey)(nil), k.Raw())
 	suite.IsType((*rsa.PublicKey)(nil), k.Public())
 }
 
 // assertECKey runs standard assertions against an EC private key.
 func (suite *ParserSuite) assertECKey(k Key) {
-	suite.Equal(string(jwa.EC), k.KeyType())
+	suite.Equal(jwa.EC().String(), k.KeyType())
 	suite.IsType((*ecdsa.PrivateKey)(nil), k.Raw())
 	suite.IsType((*ecdsa.PublicKey)(nil), k.Public())
 }
@@ -257,35 +257,35 @@ func (suite *ParserSuite) testJWKSet(format string) {
 	suite.Require().NotNil(k)
 	suite.Equal("first", k.KeyID())
 	suite.Empty(k.KeyUsage())
-	suite.Equal(string(jwa.RSA), k.KeyType())
+	suite.Equal(jwa.RSA().String(), k.KeyType())
 	suite.IsType((*rsa.PrivateKey)(nil), k.Raw())
 	suite.IsType((*rsa.PublicKey)(nil), k.Public())
 
 	k = keys[1]
 	suite.Require().NotNil(k)
 	suite.Empty(k.KeyUsage())
-	suite.Equal(string(jwa.RSA), k.KeyType())
+	suite.Equal(jwa.RSA().String(), k.KeyType())
 	suite.IsType((*rsa.PublicKey)(nil), k.Raw())
 	suite.IsType((*rsa.PublicKey)(nil), k.Public())
 
 	k = keys[2]
 	suite.Require().NotNil(k)
 	suite.Empty(k.KeyUsage())
-	suite.Equal(string(jwa.EC), k.KeyType())
+	suite.Equal(jwa.EC().String(), k.KeyType())
 	suite.IsType((*ecdsa.PrivateKey)(nil), k.Raw())
 	suite.IsType((*ecdsa.PublicKey)(nil), k.Public())
 
 	k = keys[3]
 	suite.Require().NotNil(k)
 	suite.Empty(k.KeyUsage())
-	suite.Equal(string(jwa.EC), k.KeyType())
+	suite.Equal(jwa.EC().String(), k.KeyType())
 	suite.IsType((*ecdsa.PublicKey)(nil), k.Raw())
 	suite.IsType((*ecdsa.PublicKey)(nil), k.Public())
 
 	k = keys[4]
 	suite.Require().NotNil(k)
 	suite.Empty(k.KeyUsage())
-	suite.Equal(string(jwa.OctetSeq), k.KeyType())
+	suite.Equal(jwa.OctetSeq().String(), k.KeyType())
 	suite.IsType(([]byte)(nil), k.Raw())
 	suite.IsType(([]byte)(nil), k.Public())
 	suite.Equal(k.Raw(), k.Public())
@@ -293,14 +293,14 @@ func (suite *ParserSuite) testJWKSet(format string) {
 	k = keys[5]
 	suite.Require().NotNil(k)
 	suite.Empty(k.KeyUsage())
-	suite.Equal(string(jwa.OKP), k.KeyType())
+	suite.Equal(jwa.OKP().String(), k.KeyType())
 	suite.IsType((ed25519.PrivateKey)(nil), k.Raw())
 	suite.IsType((ed25519.PublicKey)(nil), k.Public())
 
 	k = keys[6]
 	suite.Require().NotNil(k)
 	suite.Empty(k.KeyUsage())
-	suite.Equal(string(jwa.OKP), k.KeyType())
+	suite.Equal(jwa.OKP().String(), k.KeyType())
 	suite.IsType((ed25519.PublicKey)(nil), k.Raw())
 	suite.IsType((ed25519.PublicKey)(nil), k.Public())
 }
