@@ -9,7 +9,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"go.uber.org/multierr"
 )
 
@@ -69,14 +69,25 @@ func (k *key) Public() crypto.PublicKey { return k.public }
 func (k *key) String() string           { return k.keyID }
 
 func convertJWKKey(jk jwk.Key) (Key, error) {
-	k := &key{
-		Thumbprinter: jk,
-		keyID:        jk.KeyID(),
-		keyType:      string(jk.KeyType()),
-		keyUsage:     jk.KeyUsage(),
+	keyID, ok := jk.KeyID()
+	if !ok {
+		keyID = ""
 	}
 
-	if err := jk.Raw(&k.raw); err != nil {
+	keyUsage, ok := jk.KeyUsage()
+	if !ok {
+		keyUsage = ""
+	}
+
+	k := &key{
+		Thumbprinter: jk,
+		keyID:        keyID,
+		keyType:      jk.KeyType().String(),
+		keyUsage:     keyUsage,
+	}
+
+	var err error
+	if k.raw, err = jwk.Export[any](jk); err != nil {
 		return nil, err
 	}
 
@@ -102,7 +113,7 @@ func convertJWKKey(jk jwk.Key) (Key, error) {
 		// public key.
 		if pub, err := jk.PublicKey(); err != nil {
 			return nil, err
-		} else if err := pub.Raw(&k.public); err != nil {
+		} else if k.public, err = jwk.Export[any](pub); err != nil {
 			return nil, err
 		}
 	}

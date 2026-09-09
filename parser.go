@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"go.uber.org/multierr"
 )
 
@@ -90,8 +90,8 @@ func NewParser(options ...ParserOption) (Parser, error) {
 func defaultParser() *parsers {
 	return &parsers{
 		p: map[string]Parser{
-			SuffixPEM:    JWKSetParser{Options: []jwk.ParseOption{jwk.WithPEM(true)}},
-			MediaTypePEM: JWKSetParser{Options: []jwk.ParseOption{jwk.WithPEM(true)}},
+			SuffixPEM:    JWKSetParser{Options: []jwk.ParseOption{jwk.WithX509(true)}},
+			MediaTypePEM: JWKSetParser{Options: []jwk.ParseOption{jwk.WithX509(true)}},
 
 			SuffixJSON:    JWKSetParser{},
 			MediaTypeJSON: JWKSetParser{},
