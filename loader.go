@@ -114,7 +114,7 @@ func defaultLoader() *loaders {
 	hl := HTTPLoader{
 		Client:       http.DefaultClient,
 		MaxReadLimit: int64(1 * 1024 * 25),
-		Timeout:      200 * time.Millisecond,
+		Timeout:      30 * time.Second,
 	}
 
 	return &loaders{
