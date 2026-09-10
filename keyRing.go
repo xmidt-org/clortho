@@ -3,7 +3,11 @@
 
 package clortho
 
-import "sync"
+import (
+	"maps"
+	"slices"
+	"sync"
+)
 
 // KeyAccessor is a read-only interface to a set of keys.
 type KeyAccessor interface {
@@ -34,6 +38,8 @@ type KeyRing interface {
 	// Remove allows add hoc keys to be removed from this ring.  Any key ID that isn't
 	// in this ring is ignored.  The actual count of deleted keys is returned.
 	Remove(keyIDs ...string) int
+
+	Clone() []Key
 }
 
 // NewKeyRing constructs a KeyRing with an optional set of initial keys.  Any key
@@ -94,6 +100,13 @@ func (kr *keyRing) OnRefreshEvent(event RefreshEvent) {
 		keyID := key.KeyID()
 		delete(kr.keys, keyID)
 	}
+}
+
+func (kr *keyRing) Clone() []Key {
+	kr.lock.Lock()
+	defer kr.lock.Unlock()
+
+	return slices.Collect(maps.Values(kr.keys))
 }
 
 func (kr *keyRing) Add(keys ...Key) (n int) {
