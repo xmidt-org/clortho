@@ -230,3 +230,20 @@ func WithConfig(cfg Config) ResolverRefresherOption {
 		cfg: cfg,
 	}
 }
+
+// KeyProviderOption represents a configurable option for building a Loader.
+type KeyProviderOption interface {
+	apply(*keyProvider) error
+}
+
+type keyProviderOptionFunc func(*keyProvider) error
+
+func (kpof keyProviderOptionFunc) apply(kp *keyProvider) error { return kpof(kp) }
+
+func WithRingKey(kr KeyRing) KeyProviderOption {
+	return keyProviderOptionFunc(func(kp *keyProvider) error {
+		kp.keyRing = kr
+
+		return nil
+	})
+}
