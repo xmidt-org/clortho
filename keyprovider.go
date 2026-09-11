@@ -5,11 +5,16 @@ package clortho
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/lestrrat-go/jwx/v4/jws"
 	"go.uber.org/multierr"
+)
+
+var (
+	ErrKeyProviderKeyNotFound = errors.New("key provider failed to find the request kid in its keyring")
 )
 
 func NewKeyProvider(opts ...KeyProviderOption) (jws.KeyProvider, error) {
@@ -35,7 +40,7 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 
 	ckey, ok := kp.keyRing.Get(kid)
 	if !ok {
-		return fmt.Errorf(`key with "kid" %q not found in clortho keyring`, kid)
+		return fmt.Errorf("%w: kid `%q` not found in keyring", ErrKeyProviderKeyNotFound, kid)
 	}
 
 	key, err := jwk.Import[jwk.Key](ckey.Raw())
