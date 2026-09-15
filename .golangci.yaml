@@ -39,3 +39,9 @@ linters:
           - funlen
           - unused
         path: _test.go
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
