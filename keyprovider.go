@@ -89,25 +89,12 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 		}
 	}
 
-	// nolint: staticcheck
-	algs, err := jws.AlgorithmsForKey(key)
-	if err != nil {
-		return fmt.Errorf(`failed to get a list of signature methods for key type %s: %w`, key.KeyType(), err)
-	}
-
-	hdrAlg, ok := sig.ProtectedHeaders().Algorithm()
+	alg, ok := sig.ProtectedHeaders().Algorithm()
 	if !ok {
 		return fmt.Errorf(`protected header must contain an "alg" field`)
 	}
 
-	for _, alg := range algs {
-		if hdrAlg != alg {
-			continue
-		}
+	sink.Key(alg, key)
 
-		sink.Key(alg, key)
-		return nil
-	}
-
-	return fmt.Errorf(`algorithm %q in JWS header does not match any algorithm for key type %s from jku`, hdrAlg, key.KeyType())
+	return nil
 }
