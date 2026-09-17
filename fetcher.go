@@ -60,7 +60,7 @@ func (f *fetcher) Fetch(ctx context.Context, location string) ([]Key, ContentMet
 	}
 
 	if errs != nil {
-		return nil, ContentMeta{}, err
+		return nil, ContentMeta{}, errs
 	}
 
 	return keys, nextMeta, nil
