@@ -349,7 +349,7 @@ func (suite *LoaderSuite) testHTTPSCustomLoaderError() {
 		BodyString(keyContent).
 		SetHeader("Content-Type", MediaTypeJWK)
 	suite.PanicsWithError(errNoContentMeta.Error(), func() {
-		l.LoadContent(
+		_, _, _ = l.LoadContent(
 			context.Background(),
 			testHTTPSGet,
 		)

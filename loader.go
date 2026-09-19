@@ -212,7 +212,9 @@ func (hl *HTTPLoader) transact(req *http.Request) (*http.Response, []byte, error
 	}
 
 	defer func() {
-		io.Copy(io.Discard, io.LimitReader(resp.Body, hl.MaxReadLimit))
+		// drain the body so the connection can be reused.  a failure here is
+		// irrelevant, since the body is about to be closed anyway.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, hl.MaxReadLimit))
 		resp.Body.Close()
 		resp.Body = nil
 	}()

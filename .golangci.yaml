@@ -11,11 +11,9 @@ linters:
     - goconst
     - gosec
     - misspell
+    - nilnesserr
     - unconvert
     - prealloc
-  disable:
-    - errcheck
-    - ineffassign
   settings:
     misspell:
       locale: US
