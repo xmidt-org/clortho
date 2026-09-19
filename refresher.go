@@ -83,7 +83,8 @@ type Refresher interface {
 }
 
 // NewRefresher constructs a Refresher using the supplied options.  Without any options,
-// a default Loader and Parser are created and used.
+// a default Loader and Parser are created and used.  Whenever the returned error is
+// non-nil, the returned Refresher is nil.
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
 	var err error
 	r := &refresher{
@@ -100,10 +101,12 @@ func NewRefresher(options ...RefresherOption) (Refresher, error) {
 
 	err = multierr.Append(err, validateRefreshSources(r.sources...))
 	if err != nil {
-		r = nil
+		// NOTE: an explicit nil, not a nil *refresher, so that a caller comparing the
+		// returned interface against nil sees what it expects.
+		return nil, err
 	}
 
-	return r, err
+	return r, nil
 }
 
 // refresher is the internal Refresher implementation.

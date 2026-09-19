@@ -95,8 +95,31 @@ func (suite *ResolverSuite) newResolver(options ...ResolverOption) Resolver {
 
 func (suite *ResolverSuite) TestNoKeyIDTemplate() {
 	r, err := NewResolver()
-	suite.Error(err)
-	suite.Nil(r)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrNoTemplate)
+
+	// suite.Nil would accept a nil *resolver inside a non-nil Resolver, which is
+	// exactly what a caller's "if r != nil" guard does not accept.
+	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
+}
+
+// TestOptionError checks that a failing option yields a nil Resolver even when
+// a template was supplied, i.e. a caller never gets a Resolver alongside an error.
+func (suite *ResolverSuite) TestOptionError() {
+	expectedErr := errors.New("expected option failure")
+	failingOption := resolverOptionFunc(func(*resolver) error {
+		return expectedErr
+	})
+
+	r, err := NewResolver(
+		WithKeyIDTemplate(testKeyIDURL),
+		failingOption,
+	)
+
+	suite.Require().Error(err)
+	suite.ErrorIs(err, expectedErr)
+	suite.NotErrorIs(err, ErrNoTemplate)
+	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
 }
 
 func (suite *ResolverSuite) TestDefault() {

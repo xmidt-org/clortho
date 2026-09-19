@@ -73,7 +73,8 @@ type Resolver interface {
 // NewResolver constructs a Resolver from a set of options.  By default, a Resolver
 // uses the DefaultLoader() and DefaultParser().
 //
-// If no URI template is supplied, this function returns ErrNoTemplate.
+// If no URI template is supplied, this function returns ErrNoTemplate.  Whenever
+// the returned error is non-nil, the returned Resolver is nil.
 func NewResolver(options ...ResolverOption) (Resolver, error) {
 	var (
 		err error
@@ -92,11 +93,16 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 	}
 
 	if r.keyIDExpander == nil {
-		r = nil
 		err = multierr.Append(err, ErrNoTemplate)
 	}
 
-	return r, err
+	if err != nil {
+		// NOTE: an explicit nil, not a nil *resolver, so that a caller comparing the
+		// returned interface against nil sees what it expects.
+		return nil, err
+	}
+
+	return r, nil
 }
 
 // pendingResolverRequest represents a resolve operation that is inflight.  Concurrent
