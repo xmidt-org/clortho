@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -157,8 +158,20 @@ type HTTPLoader struct {
 	// no timeout is used.
 	Timeout time.Duration
 
-	// MaxReadLimit limits how many bytes are read from responses.
+	// MaxReadLimit limits how many bytes are read from responses.  A body larger
+	// than this results in a ResponseTooLargeError.  If unset, no limit is applied.
 	MaxReadLimit int64
+}
+
+// readLimit returns the effective read limit, treating an unset MaxReadLimit as
+// unlimited.  The unlimited value leaves room for the one extra byte transact
+// reads to detect an oversized body.
+func (hl *HTTPLoader) readLimit() int64 {
+	if hl.MaxReadLimit > 0 {
+		return hl.MaxReadLimit
+	}
+
+	return math.MaxInt64 - 1
 }
 
 func (hl *HTTPLoader) newContext(parentCtx context.Context) (context.Context, context.CancelFunc) {
@@ -209,7 +222,7 @@ func (hl *HTTPLoader) transact(req *http.Request) (*http.Response, []byte, error
 	defer func() {
 		// drain the body so the connection can be reused.  a failure here is
 		// irrelevant, since the body is about to be closed anyway.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, hl.MaxReadLimit))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, hl.readLimit()))
 		resp.Body.Close()
 		resp.Body = nil
 	}()
@@ -221,15 +234,23 @@ func (hl *HTTPLoader) transact(req *http.Request) (*http.Response, []byte, error
 		// just ignore anything in the body.
 
 	case http.StatusOK:
-		// NOTE: Content-Length is required for HTTP/1.1+
-		// we explicitly require that header here
-		cl := resp.ContentLength
-		if cl > 0 {
-			data := make([]byte, cl)
-			_, err = io.ReadFull(io.LimitReader(resp.Body, hl.MaxReadLimit), data)
-
-			return resp, data, err
+		// read the body regardless of Content-Length, since a chunked response
+		// has none.  reading one byte past the limit is what distinguishes a body
+		// that is exactly at the limit from one that exceeds it.
+		limit := hl.readLimit()
+		data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+		if err != nil {
+			return nil, nil, err
 		}
+
+		if int64(len(data)) > limit {
+			return nil, nil, &ResponseTooLargeError{
+				Location: resp.Request.URL.String(),
+				Limit:    limit,
+			}
+		}
+
+		return resp, data, nil
 
 	default:
 		return nil, nil, &HTTPLoaderError{
@@ -347,4 +368,15 @@ func (fl FileLoader) LoadContent(ctx context.Context, location string) ([]byte, 
 	}
 
 	return data, fl.newMeta(path, fi), nil
+}
+
+// ResponseTooLargeError indicates that an HTTP response body exceeded the
+// loader's MaxReadLimit.
+type ResponseTooLargeError struct {
+	Location string
+	Limit    int64
+}
+
+func (rtle *ResponseTooLargeError) Error() string {
+	return fmt.Sprintf("Response from %s exceeded the read limit of %d bytes", rtle.Location, rtle.Limit)
 }
