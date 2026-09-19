@@ -6,8 +6,8 @@ package clortho
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/jtacoma/uritemplates"
 	"go.uber.org/multierr"
@@ -24,6 +24,11 @@ var (
 
 	// ErrKeyNotFound indicates that a key could not be resolved, e.g. a key ID did not exist.
 	ErrKeyNotFound = errors.New("no such key exists")
+
+	// ErrFetchPanicked is returned to goroutines that were waiting on a fetch which
+	// panicked in another goroutine.  The panic itself propagates in the goroutine
+	// that performed the fetch.
+	ErrFetchPanicked = errors.New("the fetch for that key panicked")
 )
 
 // ResolveEvent holds information about a key ID that has been resolved.
@@ -111,7 +116,12 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 type pendingResolverRequest struct {
 	keyID string
 	done  chan struct{}
-	value atomic.Value
+
+	// key and err are the outcome of the fetch.  They are written by the fetching
+	// goroutine before done is closed, and read by waiters only after done is
+	// closed, so the channel provides the necessary synchronization.
+	key Key
+	err error
 }
 
 // pendingResolverRequests holds the key requests that are in-flight.  Map keys
@@ -178,17 +188,40 @@ func (r *resolver) waitForKey(ctx context.Context, request *pendingResolverReque
 		err = ctx.Err()
 
 	case <-request.done:
-		var ok bool
-		k, ok = request.value.Load().(Key)
-		if !ok {
-			err = ErrKeyNotFound
-		}
+		k, err = request.key, request.err
 	}
 
 	return
 }
 
-func (r *resolver) fetchKey(ctx context.Context, keyID string, request *pendingResolverRequest) (location string, k Key, err error) {
+// fetchAndRelease performs the fetch for a pending request, then releases every
+// goroutine waiting on it with the outcome.  Release is guaranteed even when the
+// fetch panics: waiters receive ErrFetchPanicked, and the panic continues to
+// propagate in this goroutine.  Without that guarantee a panic would leave the
+// request pending forever, and every later Resolve for the same key would wait
+// on it.
+func (r *resolver) fetchAndRelease(ctx context.Context, keyID string, request *pendingResolverRequest) (location string, k Key, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			k, err = nil, fmt.Errorf("%w: %v", ErrFetchPanicked, p)
+			defer panic(p)
+		}
+
+		if err == nil && r.keyRing != nil {
+			r.keyRing.Add(k)
+		}
+
+		request.key, request.err = k, err
+
+		r.resolveLock.Lock()
+		r.pending.cleanup(request)
+		r.resolveLock.Unlock()
+	}()
+
+	return r.fetchKey(ctx, keyID)
+}
+
+func (r *resolver) fetchKey(ctx context.Context, keyID string) (location string, k Key, err error) {
 	location, err = r.keyIDExpander.Expand(map[string]any{
 		KeyIDParameterName: keyID,
 	})
@@ -241,31 +274,19 @@ func (r *resolver) Resolve(ctx context.Context, keyID string) (k Key, err error)
 
 	if wait {
 		// another goroutine is currently fetching the key, so wait for it to be done
-		k, err = r.waitForKey(ctx, request)
-	} else {
-		// this is the goroutine that is now responsible for fetching the key
-		var location string
-		location, k, err = r.fetchKey(ctx, keyID, request)
-
-		if err == nil {
-			if r.keyRing != nil {
-				r.keyRing.Add(k)
-			}
-
-			request.value.Store(k)
-		}
-
-		r.resolveLock.Lock()
-		r.pending.cleanup(request)
-		r.resolveLock.Unlock()
-
-		r.dispatch(ResolveEvent{
-			URI:   location,
-			Key:   k,
-			KeyID: keyID,
-			Err:   err,
-		})
+		return r.waitForKey(ctx, request)
 	}
+
+	// this is the goroutine that is now responsible for fetching the key
+	var location string
+	location, k, err = r.fetchAndRelease(ctx, keyID, request)
+
+	r.dispatch(ResolveEvent{
+		URI:   location,
+		Key:   k,
+		KeyID: keyID,
+		Err:   err,
+	})
 
 	return
 }
