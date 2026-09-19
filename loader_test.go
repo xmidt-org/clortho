@@ -6,8 +6,12 @@ package clortho
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
+	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"testing"
@@ -635,6 +639,171 @@ func (suite *LoaderSuite) TestUnsupportedScheme() {
 	suite.Require().ErrorAs(err, &use)
 	suite.Equal(unsupported, use.Location)
 	suite.Contains(use.Error(), unsupported)
+}
+
+// newChunkedServer serves body with chunked transfer encoding, which is what a
+// proxy or gateway that re-encodes responses produces.  The client then sees a
+// ContentLength of -1.
+func (suite *LoaderSuite) newChunkedServer(body string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", MediaTypeJWK)
+		rw.Header().Set("Transfer-Encoding", "chunked")
+		_, _ = rw.Write([]byte(body))
+	}))
+}
+
+// newSizedServer serves body with an explicit Content-Length.
+func (suite *LoaderSuite) newSizedServer(body string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", MediaTypeJWK)
+		rw.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = rw.Write([]byte(body))
+	}))
+}
+
+// newLimitedLoader returns a Loader whose http scheme is served by an HTTPLoader
+// with the given read limit.
+func (suite *LoaderSuite) newLimitedLoader(limit int64) Loader {
+	return suite.newLoader(
+		WithSchemes(
+			HTTPLoader{
+				Client:       http.DefaultClient,
+				MaxReadLimit: limit,
+			},
+			"http",
+		),
+	)
+}
+
+// TestHTTPChunkedBody checks that a response with no Content-Length, i.e. chunked
+// transfer encoding, is read in full.  The default loader must handle this, since
+// JWKS endpoints behind proxies commonly respond this way.
+func (suite *LoaderSuite) TestHTTPChunkedBody() {
+	server := suite.newChunkedServer(keyContent)
+	defer server.Close()
+
+	content, meta, err := suite.newLoader().LoadContent(context.Background(), server.URL+"/keys")
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+}
+
+// TestHTTPBodyTooLarge checks that a body larger than MaxReadLimit is reported as
+// exactly that, rather than as a truncated read or a parse failure downstream.
+func (suite *LoaderSuite) TestHTTPBodyTooLarge() {
+	server := suite.newSizedServer(keyContent)
+	defer server.Close()
+
+	limit := int64(len(keyContent) - 1)
+	content, meta, err := suite.newLimitedLoader(limit).LoadContent(context.Background(), server.URL+"/keys")
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.Require().Error(err)
+
+	var rtle *ResponseTooLargeError
+	suite.Require().ErrorAs(err, &rtle)
+	suite.Equal(limit, rtle.Limit)
+	suite.Contains(rtle.Location, "/keys")
+}
+
+// TestHTTPChunkedBodyTooLarge is TestHTTPBodyTooLarge for a response whose size is
+// not known up front.  The limit must be enforced while reading, not from a header.
+func (suite *LoaderSuite) TestHTTPChunkedBodyTooLarge() {
+	server := suite.newChunkedServer(keyContent)
+	defer server.Close()
+
+	limit := int64(len(keyContent) - 1)
+	content, meta, err := suite.newLimitedLoader(limit).LoadContent(context.Background(), server.URL+"/keys")
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.Require().Error(err)
+
+	var rtle *ResponseTooLargeError
+	suite.Require().ErrorAs(err, &rtle)
+	suite.Equal(limit, rtle.Limit)
+}
+
+// TestHTTPBodyAtLimit checks the boundary: a body of exactly MaxReadLimit bytes is
+// not too large.
+func (suite *LoaderSuite) TestHTTPBodyAtLimit() {
+	server := suite.newSizedServer(keyContent)
+	defer server.Close()
+
+	content, _, err := suite.newLimitedLoader(int64(len(keyContent))).LoadContent(context.Background(), server.URL+"/keys")
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(content))
+}
+
+// TestHTTPNoReadLimit checks that an HTTPLoader constructed without a MaxReadLimit
+// reads the whole body, consistent with the Timeout field where zero means none.
+func (suite *LoaderSuite) TestHTTPNoReadLimit() {
+	server := suite.newSizedServer(keyContent)
+	defer server.Close()
+
+	content, _, err := suite.newLimitedLoader(0).LoadContent(context.Background(), server.URL+"/keys")
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(content))
+}
+
+// TestHTTPLoaderReadLimit checks how MaxReadLimit maps to the limit actually
+// applied when reading: a positive value is used as is, and anything else
+// means no limit.
+func (suite *LoaderSuite) TestHTTPLoaderReadLimit() {
+	testCases := []struct {
+		name     string
+		max      int64
+		expected int64
+	}{
+		{name: "Unset", max: 0, expected: math.MaxInt64 - 1},
+		{name: "Negative", max: -1, expected: math.MaxInt64 - 1},
+		{name: "One", max: 1, expected: 1},
+		{name: "Default", max: int64(1 * 1024 * 25), expected: int64(1 * 1024 * 25)},
+		{name: "Max", max: math.MaxInt64, expected: math.MaxInt64},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			hl := HTTPLoader{MaxReadLimit: tc.max}
+			suite.Equal(tc.expected, hl.readLimit())
+		})
+	}
+}
+
+// TestResponseTooLargeError checks the error's message and that it can be
+// recovered from a wrapped error by type.
+func (suite *LoaderSuite) TestResponseTooLargeError() {
+	var (
+		rtle = &ResponseTooLargeError{
+			Location: testHTTPSGet,
+			Limit:    1234,
+		}
+
+		wrapped = fmt.Errorf("fetching keys: %w", rtle)
+	)
+
+	suite.Contains(rtle.Error(), testHTTPSGet)
+	suite.Contains(rtle.Error(), "1234")
+
+	var target *ResponseTooLargeError
+	suite.Require().ErrorAs(wrapped, &target)
+	suite.Same(rtle, target)
+}
+
+// TestHTTPBodyTruncated checks that a body which fails partway through reading
+// is reported as a read error, with no content.  The server declares more bytes
+// than it sends, which makes it close the connection early.
+func (suite *LoaderSuite) TestHTTPBodyTruncated() {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", MediaTypeJWK)
+		rw.Header().Set("Content-Length", strconv.Itoa(2*len(keyContent)))
+		_, _ = rw.Write([]byte(keyContent))
+	}))
+	defer server.Close()
+
+	content, meta, err := suite.newLoader().LoadContent(context.Background(), server.URL+"/keys")
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.ErrorIs(err, io.ErrUnexpectedEOF)
 }
 
 func TestLoader(t *testing.T) {
