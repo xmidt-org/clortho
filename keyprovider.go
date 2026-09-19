@@ -19,6 +19,12 @@ var (
 	// ErrKeyProviderNoKeyRing indicates that no KeyRing was supplied to NewKeyProvider.
 	// A key ring is required, as it is the only source of keys for verification.
 	ErrKeyProviderNoKeyRing = errors.New("key provider requires a key ring; see WithRingKey")
+
+	// ErrNoRefreshSources indicates that a Config supplied to NewKeyProvider has no
+	// refresh sources.  Keys are served to the verifier from the refreshed key ring,
+	// not resolved per request, so without sources the ring never fills and every
+	// token fails.  Config.Resolve plays no part in verification.
+	ErrNoRefreshSources = errors.New("at least one refresh source is required; keys are served to the verifier from the refreshed key ring, not resolved per request")
 )
 
 // NewKeyProvider constructs a jws.KeyProvider that draws keys from a KeyRing, matching
@@ -27,7 +33,12 @@ var (
 // A KeyRing is required; supply one with WithRingKey.  Note that the ring is the only
 // source of keys for verification: a Resolver is deliberately not consulted, so that an
 // unverified kid cannot trigger an outbound fetch.  Keys reach the ring by way of a
-// Refresher.
+// Refresher configured from Config.Refresh.Sources.  Config.Resolve is not involved.
+//
+// Passing WithConfig makes this function check that the Config has at least one refresh
+// source, returning ErrNoRefreshSources otherwise.  That turns the most common
+// misconfiguration, a resolve template with no refresh sources, into a startup error
+// rather than a "key not found" on every token.
 //
 // If no key ring is supplied, or if any option returns an error, this function returns
 // a nil jws.KeyProvider along with a non-nil error.  Callers must not use the returned

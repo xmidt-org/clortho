@@ -382,6 +382,44 @@ func (suite *KeyProviderSuite) TestVerifySuccessByKeyType() {
 	}
 }
 
+// TestNoRefreshSources checks that a provider built with a Config that has no
+// refresh sources is rejected.  Keys reach the verifier only through the
+// refreshed ring, so such a deployment would answer every token with "key not
+// found" while its configuration looked correct.
+func (suite *KeyProviderSuite) TestNoRefreshSources() {
+	kp, err := NewKeyProvider(
+		WithRingKey(NewKeyRing()),
+		WithConfig(Config{
+			Resolve: ResolveConfig{Template: "https://example.com/keys/{keyID}"},
+		}),
+	)
+
+	suite.Nil(kp)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrNoRefreshSources)
+	suite.NotErrorIs(err, ErrKeyProviderNoKeyRing)
+}
+
+// TestWithRefreshSources checks that a Config with at least one refresh source
+// is accepted, and that the provider still verifies from its ring.
+func (suite *KeyProviderSuite) TestWithRefreshSources() {
+	kp, err := NewKeyProvider(
+		WithRingKey(suite.newRingWith("kid-1")),
+		WithConfig(Config{
+			Refresh: RefreshConfig{
+				Sources: []RefreshSource{{URI: "https://example.com/keys"}},
+			},
+		}),
+	)
+
+	suite.Require().NoError(err)
+	suite.Require().NotNil(kp)
+
+	payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
+	suite.Require().NoError(err)
+	suite.JSONEq(`{"sub":"test"}`, string(payload))
+}
+
 func TestKeyProvider(t *testing.T) {
 	suite.Run(t, new(KeyProviderSuite))
 }

@@ -325,6 +325,36 @@ func (suite *RefresherSuite) TestOptionError() {
 	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
 }
 
+// TestWithConfig checks that a Refresher takes its sources from Config.Refresh,
+// including the validation applied to them.
+func (suite *RefresherSuite) TestWithConfig() {
+	r, err := NewRefresher(
+		WithConfig(Config{
+			Refresh: RefreshConfig{
+				Sources: []RefreshSource{
+					{URI: "https://example.net"},
+					{URI: "https://example.net"},
+				},
+			},
+		}),
+	)
+
+	suite.Require().Error(err)
+	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
+
+	r, err = NewRefresher(
+		WithConfig(Config{
+			Refresh: RefreshConfig{
+				Sources: []RefreshSource{{URI: "https://example.net"}},
+			},
+		}),
+	)
+
+	suite.Require().NoError(err)
+	suite.Require().NotNil(r)
+	suite.Len(r.(*refresher).sources, 1)
+}
+
 func TestRefresher(t *testing.T) {
 	suite.Run(t, new(RefresherSuite))
 }

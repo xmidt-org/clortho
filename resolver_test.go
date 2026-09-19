@@ -707,6 +707,29 @@ func (suite *ResolverSuite) TestRingCheckedUnderLock() {
 	fetcher.AssertExpectations(suite.T())
 }
 
+// TestWithConfig checks that a Resolver takes its key ID template from Config.Resolve.
+func (suite *ResolverSuite) TestWithConfig() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithConfig(Config{
+				Resolve: ResolveConfig{Template: testKeyIDURL},
+			}),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), testKeyURL).
+		Return([]Key{suite.testKey}, ContentMeta{}, nil).
+		Once()
+
+	key, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Equal(suite.testKey, key)
+
+	f.AssertExpectations(suite.T())
+}
+
 func TestResolver(t *testing.T) {
 	suite.Run(t, new(ResolverSuite))
 }
