@@ -6,7 +6,9 @@ package clortho
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -740,6 +742,50 @@ func (suite *LoaderSuite) TestHTTPNoReadLimit() {
 	content, _, err := suite.newLimitedLoader(0).LoadContent(context.Background(), server.URL+"/keys")
 	suite.Require().NoError(err)
 	suite.Equal(keyContent, string(content))
+}
+
+// TestHTTPLoaderReadLimit checks how MaxReadLimit maps to the limit actually
+// applied when reading: a positive value is used as is, and anything else
+// means no limit.
+func (suite *LoaderSuite) TestHTTPLoaderReadLimit() {
+	testCases := []struct {
+		name     string
+		max      int64
+		expected int64
+	}{
+		{name: "Unset", max: 0, expected: math.MaxInt64 - 1},
+		{name: "Negative", max: -1, expected: math.MaxInt64 - 1},
+		{name: "One", max: 1, expected: 1},
+		{name: "Default", max: int64(1 * 1024 * 25), expected: int64(1 * 1024 * 25)},
+		{name: "Max", max: math.MaxInt64, expected: math.MaxInt64},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			hl := HTTPLoader{MaxReadLimit: tc.max}
+			suite.Equal(tc.expected, hl.readLimit())
+		})
+	}
+}
+
+// TestResponseTooLargeError checks the error's message and that it can be
+// recovered from a wrapped error by type.
+func (suite *LoaderSuite) TestResponseTooLargeError() {
+	var (
+		rtle = &ResponseTooLargeError{
+			Location: testHTTPSGet,
+			Limit:    1234,
+		}
+
+		wrapped = fmt.Errorf("fetching keys: %w", rtle)
+	)
+
+	suite.Contains(rtle.Error(), testHTTPSGet)
+	suite.Contains(rtle.Error(), "1234")
+
+	var target *ResponseTooLargeError
+	suite.Require().ErrorAs(wrapped, &target)
+	suite.Same(rtle, target)
 }
 
 func TestLoader(t *testing.T) {
