@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"net/http"
@@ -786,6 +787,23 @@ func (suite *LoaderSuite) TestResponseTooLargeError() {
 	var target *ResponseTooLargeError
 	suite.Require().ErrorAs(wrapped, &target)
 	suite.Same(rtle, target)
+}
+
+// TestHTTPBodyTruncated checks that a body which fails partway through reading
+// is reported as a read error, with no content.  The server declares more bytes
+// than it sends, which makes it close the connection early.
+func (suite *LoaderSuite) TestHTTPBodyTruncated() {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", MediaTypeJWK)
+		rw.Header().Set("Content-Length", strconv.Itoa(2*len(keyContent)))
+		_, _ = rw.Write([]byte(keyContent))
+	}))
+	defer server.Close()
+
+	content, meta, err := suite.newLoader().LoadContent(context.Background(), server.URL+"/keys")
+	suite.Empty(content)
+	suite.Equal(ContentMeta{}, meta)
+	suite.ErrorIs(err, io.ErrUnexpectedEOF)
 }
 
 func TestLoader(t *testing.T) {
