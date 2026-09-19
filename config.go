@@ -82,7 +82,14 @@ func validateRefreshSources(in ...RefreshSource) (err error) {
 	return
 }
 
-// ResolveConfig configures how to fetch individual keys on demand.
+// ResolveConfig configures how to fetch individual keys on demand.  It is used by
+// NewResolver, via WithConfig, and by nothing else.  A Resolver serves callers that
+// ask for a specific key by ID, such as clients that need a key to verify a
+// particular message.
+//
+// ResolveConfig plays no part in JWT verification through NewKeyProvider: the
+// provider reads only the key ring, which is filled from RefreshConfig.Sources.  A
+// deployment that sets only a resolve template will never have a key to verify with.
 type ResolveConfig struct {
 	// Template is a URI template used to fetch keys.  This template may
 	// use a single parameter named keyID, e.g. http://keys.com/{keyID}.
@@ -93,12 +100,15 @@ type ResolveConfig struct {
 	Timeout time.Duration `json:"timeout" yaml:"timeout"`
 }
 
-// RefreshConfig configures all aspects of key refresh.
+// RefreshConfig configures all aspects of key refresh.  This is the only path by
+// which keys reach a jws.KeyProvider: a Refresher polls these sources and fills the
+// key ring the provider reads from.
 type RefreshConfig struct {
 	// Sources are the set of refresh sources to be polled for key material.
 	//
 	// If this slice is empty, a Refresher is still created, but it will
-	// do nothing.
+	// do nothing.  NewKeyProvider rejects a Config with no sources; see
+	// ErrNoRefreshSources.
 	//
 	// If there are multiple sources with the same URI, an error is raised.
 	Sources []RefreshSource `json:"sources" yaml:"sources"`
@@ -107,10 +117,12 @@ type RefreshConfig struct {
 // Config configures clortho from (possibly) externally unmarshaled locations.
 type Config struct {
 	// Resolve is the subset of configuration that establishes how individual
-	// keys will be resolved (or, fetched) on demand.
+	// keys will be resolved (or, fetched) on demand by a Resolver.  It is not
+	// used for JWT verification; see ResolveConfig.
 	Resolve ResolveConfig `json:"resolve" yaml:"resolve"`
 
 	// Refresh is the subset of configuration that configures how keys are
-	// refreshed asynchronously.
+	// refreshed asynchronously.  This is what feeds the key ring that a
+	// jws.KeyProvider verifies against; see RefreshConfig.
 	Refresh RefreshConfig `json:"refresh" yaml:"refresh"`
 }

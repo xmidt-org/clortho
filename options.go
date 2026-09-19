@@ -212,6 +212,18 @@ func WithFetcher(f Fetcher) ResolverRefresherOption {
 	}
 }
 
+// ConfigOption is the return type of WithConfig, and nothing more.  Each
+// constructor takes its own option interface, and Go has no way to say "accepted
+// by all three" except an interface that embeds all three.  This is the same
+// pattern as ResolverRefresherOption, widened to include NewKeyProvider.
+// Callers never implement, name, or call methods on it; they pass the value
+// straight to a constructor.
+type ConfigOption interface {
+	ResolverOption
+	RefresherOption
+	KeyProviderOption
+}
+
 type configOption struct {
 	cfg Config
 }
@@ -224,14 +236,34 @@ func (co configOption) applyToResolver(r *resolver) error {
 	return WithKeyIDTemplate(co.cfg.Resolve.Template).applyToResolver(r)
 }
 
-// WithConfig uses a Config struct to configure a Refresher and/or Resolver.
-func WithConfig(cfg Config) ResolverRefresherOption {
+// apply validates that the Config can feed the provider's ring.  The provider
+// never reads the Config otherwise: keys come from the ring, which a Refresher
+// fills from Refresh.Sources.  With no sources the ring stays empty and every
+// token fails with "key not found", so reject that at construction.
+func (co configOption) apply(*keyProvider) error {
+	if len(co.cfg.Refresh.Sources) == 0 {
+		return ErrNoRefreshSources
+	}
+
+	return nil
+}
+
+// WithConfig uses a Config struct to configure a Resolver, a Refresher, or a
+// jws.KeyProvider.
+//
+// For a Resolver, Config.Resolve supplies the key ID template.  For a Refresher,
+// Config.Refresh supplies the sources.  For a jws.KeyProvider, the Config is not
+// used to fetch anything; NewKeyProvider only checks that Config.Refresh has at
+// least one source, and returns ErrNoRefreshSources otherwise.  Supply it there
+// so that a deployment configured with only a resolve template fails at startup
+// instead of rejecting every token.
+func WithConfig(cfg Config) ConfigOption {
 	return configOption{
 		cfg: cfg,
 	}
 }
 
-// KeyProviderOption represents a configurable option for building a Loader.
+// KeyProviderOption represents a configurable option for building a jws.KeyProvider.
 type KeyProviderOption interface {
 	apply(*keyProvider) error
 }
