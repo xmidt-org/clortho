@@ -145,6 +145,84 @@ func (suite *FetcherSuite) testFetch(extra ...FetcherOption) {
 	p.AssertExpectations(suite.T())
 }
 
+// failingThumbprinter is a Thumbprinter that always fails.  It drives
+// EnsureKeyID down its error path for keys that have no key ID.
+type failingThumbprinter struct {
+	err error
+}
+
+func (ft failingThumbprinter) Thumbprint(crypto.Hash) ([]byte, error) {
+	return nil, ft.err
+}
+
+// TestKeyIDError verifies that a key ID which cannot be generated is reported
+// as an error from Fetch rather than being silently dropped.  A nil error with
+// no keys looks like a successful, empty fetch to a Refresher, which then
+// deletes every key it previously knew about.
+func (suite *FetcherSuite) TestKeyIDError() {
+	suite.Run("Thumbprinter", func() {
+		var (
+			expectedError = errors.New("expected")
+			f, l, p       = suite.newFetcherWithMocks()
+
+			parsedKeys = []Key{
+				// this key already has an ID, so it never needs a thumbprint
+				&key{Thumbprinter: failingThumbprinter{err: expectedError}, keyID: "first"},
+				// this key has no ID, and cannot produce one
+				&key{Thumbprinter: failingThumbprinter{err: expectedError}},
+			}
+		)
+
+		l.ExpectLoadContent(context.Background(), testURL).
+			Return([]byte("keys"), ContentMeta{Format: MediaTypeJWKSet}, nil).
+			Once()
+
+		p.ExpectParse(MediaTypeJWKSet, []byte("keys")).
+			Return(parsedKeys, nil).
+			Once()
+
+		keys, meta, err := f.Fetch(context.Background(), testURL)
+		suite.ErrorIs(err, expectedError)
+		suite.Empty(keys)
+		suite.Equal(ContentMeta{}, meta)
+
+		l.AssertExpectations(suite.T())
+		p.AssertExpectations(suite.T())
+	})
+
+	// UnavailableHash is the real-world trigger: a JWK with no kid and a
+	// configured key ID hash whose implementation is not linked into the binary.
+	suite.Run("UnavailableHash", func() {
+		var (
+			f, l, p = suite.newFetcherWithMocks(WithKeyIDHash(crypto.MD4))
+
+			realParser, _ = NewParser()
+		)
+
+		suite.Require().False(crypto.MD4.Available(), "this test requires MD4 to be unlinked")
+
+		parsedKeys, err := realParser.Parse(MediaTypeJWKSet, []byte(jwkFetchSet))
+		suite.Require().NoError(err)
+		suite.Require().Len(parsedKeys, 2)
+
+		l.ExpectLoadContent(context.Background(), testURL).
+			Return([]byte(jwkFetchSet), ContentMeta{Format: MediaTypeJWKSet}, nil).
+			Once()
+
+		p.ExpectParse(MediaTypeJWKSet, []byte(jwkFetchSet)).
+			Return(parsedKeys, nil).
+			Once()
+
+		keys, meta, err := f.Fetch(context.Background(), testURL)
+		suite.Error(err)
+		suite.Empty(keys)
+		suite.Equal(ContentMeta{}, meta)
+
+		l.AssertExpectations(suite.T())
+		p.AssertExpectations(suite.T())
+	})
+}
+
 func (suite *FetcherSuite) TestFetch() {
 	suite.Run("DefaultKeyIDHash", func() {
 		suite.testFetch()
