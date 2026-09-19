@@ -89,25 +89,17 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 		}
 	}
 
-	// nolint: staticcheck
-	algs, err := jws.AlgorithmsForKey(key)
-	if err != nil {
-		return fmt.Errorf(`failed to get a list of signature methods for key type %s: %w`, key.KeyType(), err)
-	}
-
 	hdrAlg, ok := sig.ProtectedHeaders().Algorithm()
 	if !ok {
 		return fmt.Errorf(`protected header must contain an "alg" field`)
 	}
 
-	for _, alg := range algs {
-		if hdrAlg != alg {
-			continue
-		}
-
-		sink.Key(alg, key)
-		return nil
-	}
-
-	return fmt.Errorf(`algorithm %q in JWS header does not match any algorithm for key type %s from jku`, hdrAlg, key.KeyType())
+	// Offer the key under the header's algorithm and let jws.Verify decide whether
+	// the pair is usable.  jwx owns that check: it rejects a key whose type cannot
+	// serve the algorithm, and it refuses to verify under any algorithm other than
+	// the one in the protected header.  A pre-check here would have to reproduce
+	// those rules, and jws.AlgorithmsForKey, the only exported helper for it, is
+	// deprecated with a warning that its answer is wider than RFC 7518 allows.
+	sink.Key(hdrAlg, key)
+	return nil
 }
