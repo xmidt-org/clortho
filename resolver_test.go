@@ -6,6 +6,8 @@ package clortho
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -348,6 +350,29 @@ func (suite *ResolverSuite) TestConcurrentFetch() {
 	suite.Equal(suite.testKey, key)
 
 	f.AssertExpectations(suite.T())
+}
+
+// TestPlainContext is the documented use of a Resolver: default options, an HTTP
+// key template, and whatever context the caller has on hand.  Nothing in the
+// Resolver API asks the caller to seed a ContentMeta, so this must work without one.
+func (suite *ResolverSuite) TestPlainContext() {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		suite.Equal("/keys/testKey", req.URL.Path)
+		rw.Header().Set("Content-Type", MediaTypeJWK)
+		_, _ = rw.Write([]byte(resolverTestKey))
+	}))
+	defer server.Close()
+
+	r := suite.newResolver(
+		WithKeyIDTemplate(server.URL + "/keys/{keyID}"),
+	)
+
+	suite.Require().NotPanics(func() {
+		k, err := r.Resolve(context.Background(), "testKey")
+		suite.Require().NoError(err)
+		suite.Require().NotNil(k)
+		suite.Equal("testKey", k.KeyID())
+	})
 }
 
 func TestResolver(t *testing.T) {

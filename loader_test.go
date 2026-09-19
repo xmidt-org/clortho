@@ -314,7 +314,11 @@ func (suite *LoaderSuite) testHTTPSCustomLoader() {
 	suite.True(gock.IsDone())
 }
 
-func (suite *LoaderSuite) testHTTPSCustomLoaderError() {
+// testHTTPSNoContentMeta verifies that a caller-supplied context carrying no
+// ContentMeta is treated as the zero value: the request is sent without
+// conditional headers, and the loader does not panic.  The Resolver and any
+// direct caller of a Loader use ordinary contexts; only the Refresher seeds one.
+func (suite *LoaderSuite) testHTTPSNoContentMeta() {
 	var (
 		client  = new(http.Client)
 		encoder = HTTPEncoder(func(ctx context.Context, r *http.Request) error {
@@ -345,15 +349,26 @@ func (suite *LoaderSuite) testHTTPSCustomLoaderError() {
 	gock.New(testHTTPSGet).
 		Get("/keys").
 		MatchHeader("Custom", "true").
+		AddMatcher(func(req *http.Request, _ *gock.Request) (bool, error) {
+			// with no ContentMeta there is nothing to be conditional about
+			return req.Header.Get("If-Modified-Since") == "", nil
+		}).
 		Reply(http.StatusOK).
 		BodyString(keyContent).
 		SetHeader("Content-Type", MediaTypeJWK)
-	suite.PanicsWithError(errNoContentMeta.Error(), func() {
-		_, _, _ = l.LoadContent(
+
+	suite.Require().NotPanics(func() {
+		content, meta, err := l.LoadContent(
 			context.Background(),
 			testHTTPSGet,
 		)
+
+		suite.Equal(keyContent, string(content))
+		suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+		suite.NoError(err)
 	})
+
+	suite.True(gock.IsDone())
 }
 
 func (suite *LoaderSuite) testHTTPSCustomLoaderDefaultClient() {
@@ -575,7 +590,7 @@ func (suite *LoaderSuite) TestHTTPLoader() {
 	suite.Run("HTTPS", suite.testHTTPS)
 	suite.Run("HTTPSClientError", suite.testHTTPSClientError)
 	suite.Run("HTTPSCustomLoader", suite.testHTTPSCustomLoader)
-	suite.Run("HTTPSCustomLoaderError", suite.testHTTPSCustomLoaderError)
+	suite.Run("HTTPSNoContentMeta", suite.testHTTPSNoContentMeta)
 	suite.Run("HTTPCustomLoader", suite.testHTTPCustomLoader)
 	suite.Run("HTTPSCustomLoader/DefaultClient", suite.testHTTPSCustomLoaderDefaultClient)
 	suite.Run("HTTPSCustomLoader/EncoderError", suite.testHTTPSCustomLoaderEncoderError)
