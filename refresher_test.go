@@ -284,8 +284,11 @@ func (suite *RefresherSuite) TestMissingURI() {
 		WithSources(RefreshSource{}),
 	)
 
-	suite.Nil(r)
 	suite.Require().Error(err)
+
+	// suite.Nil would accept a nil *refresher inside a non-nil Refresher, which is
+	// exactly what a caller's "if r != nil" guard does not accept.
+	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
 }
 
 func (suite *RefresherSuite) TestDuplicateURI() {
@@ -300,8 +303,26 @@ func (suite *RefresherSuite) TestDuplicateURI() {
 		),
 	)
 
-	suite.Nil(r)
 	suite.Require().Error(err)
+	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
+}
+
+// TestOptionError checks that a failing option yields a nil Refresher, i.e. a
+// caller never gets a Refresher alongside an error.
+func (suite *RefresherSuite) TestOptionError() {
+	expectedErr := errors.New("expected option failure")
+	failingOption := refresherOptionFunc(func(*refresher) error {
+		return expectedErr
+	})
+
+	r, err := NewRefresher(
+		WithSources(RefreshSource{URI: "https://example.net"}),
+		failingOption,
+	)
+
+	suite.Require().Error(err)
+	suite.ErrorIs(err, expectedErr)
+	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
 }
 
 func TestRefresher(t *testing.T) {
