@@ -5,7 +5,6 @@ package clortho
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -17,10 +16,6 @@ import (
 	"time"
 
 	"go.uber.org/multierr"
-)
-
-var (
-	errNoContentMeta = errors.New("previous request metadata was not found")
 )
 
 // UnsupportedSchemeError indicates that a URI's scheme was not registered
@@ -193,11 +188,11 @@ func (hl *HTTPLoader) newRequest(ctx context.Context, location string) (*http.Re
 	default:
 		return req, nil
 	}
-	meta, ok := GetContentMeta(ctx)
-	if !ok {
-		panic(errNoContentMeta)
-	}
-
+	// a context with no ContentMeta is an ordinary first request: there is no
+	// previous response to be conditional about, so the zero value is exactly right.
+	// The Refresher seeds this value between refreshes; the Resolver and direct
+	// callers do not, and must not have to.
+	meta, _ := GetContentMeta(ctx)
 	if !meta.LastModified.IsZero() {
 		req.Header.Set("If-Modified-Since", meta.LastModified.Format(time.RFC1123))
 	}
