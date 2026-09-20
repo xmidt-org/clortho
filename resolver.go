@@ -60,6 +60,16 @@ type Expander interface {
 	Expand(any) (string, error)
 }
 
+// noTemplateExpander is installed when the configured template is empty.  It makes
+// the Resolver ring-only: keys already on the ring resolve, and a miss reports
+// ErrNoTemplate instead of attempting a fetch from an empty location.  This is what
+// an application that configured refresh sources but no resolve template gets.
+type noTemplateExpander struct{}
+
+func (noTemplateExpander) Expand(any) (string, error) {
+	return "", ErrNoTemplate
+}
+
 // NewExpander constructs an Expander from a URI template.
 func NewExpander(rawTemplate string) (Expander, error) {
 	return uritemplates.Parse(rawTemplate)
@@ -78,8 +88,12 @@ type Resolver interface {
 // NewResolver constructs a Resolver from a set of options.  By default, a Resolver
 // uses the DefaultLoader() and DefaultParser().
 //
-// If no URI template is supplied, this function returns ErrNoTemplate.  Whenever
-// the returned error is non-nil, the returned Resolver is nil.
+// If no URI template option is supplied at all, this function returns ErrNoTemplate.
+// Whenever the returned error is non-nil, the returned Resolver is nil.
+//
+// An empty template, as from WithConfig with no Resolve.Template set, is accepted and
+// yields a ring-only Resolver: keys already on the ring resolve, and any other key ID
+// fails with ErrNoTemplate rather than an attempted fetch.
 func NewResolver(options ...ResolverOption) (Resolver, error) {
 	var (
 		err error
