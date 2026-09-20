@@ -7,7 +7,7 @@ clortho provides clientside management for cryptographic keys.
 [![Go Report Card](https://goreportcard.com/badge/github.com/xmidt-org/clortho)](https://goreportcard.com/report/github.com/xmidt-org/clortho)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=xmidt-org_clortho&metric=alert_status)](https://sonarcloud.io/dashboard?id=xmidt-org_clortho)
 [![Apache V2 License](http://img.shields.io/badge/license-Apache%20V2-blue.svg)](https://github.com/xmidt-org/clortho/blob/main/LICENSE)
-[![GitHub Release](https://img.shields.io/github/release/xmidt-org/clortho.svg)](CHANGELOG.md)
+[![GitHub Release](https://img.shields.io/github/release/xmidt-org/clortho.svg)](https://github.com/xmidt-org/clortho/releases)
 [![GoDoc](https://pkg.go.dev/badge/github.com/xmidt-org/clortho)](https://pkg.go.dev/github.com/xmidt-org/clortho)
 
 ## Summary
