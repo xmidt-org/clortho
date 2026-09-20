@@ -26,6 +26,19 @@ By participating, you agree to this Code.
 
 ## Details
 
+clortho fetches, caches, and refreshes the keys a service needs to verify JWS
+signatures, such as those on JWTs, and exposes them to
+[jwx](https://github.com/lestrrat-go/jwx) as a `jws.KeyProvider`.  A `KeyRing`
+holds the keys, a `Refresher` keeps it current from configured sources, and
+`NewKeyProvider` wraps it for verification.  An optional `Resolver` fetches
+individual keys on demand for callers that need one, and `clorthofx` wires all
+of it into a [go.uber.org/fx](https://github.com/uber-go/fx) application.
+
+The package documentation at
+[pkg.go.dev/github.com/xmidt-org/clortho](https://pkg.go.dev/github.com/xmidt-org/clortho)
+is the full overview, including which configuration feeds verification and
+which does not.
+
 ## Install
 
 go get -u github.com/xmidt-org/clortho
