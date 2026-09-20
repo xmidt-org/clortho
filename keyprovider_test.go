@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"testing"
 
@@ -211,7 +212,70 @@ func (suite *KeyProviderSuite) TestMissingKeyID() {
 	suite.Require().NoError(err)
 
 	_, err = jws.Verify(unsigned, jws.WithKeyProvider(kp))
-	suite.Error(err)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrKeyProviderMissingKeyID)
+
+	// the message is unchanged from before the sentinel existed
+	suite.Equal(`payload must contain a "kid" field in its protected header`, ErrKeyProviderMissingKeyID.Error())
+}
+
+// unsignedJWS builds a compact JWS by hand from the given protected header, so
+// that headers jws.Sign always supplies (such as alg) can be left out.  The
+// signature is garbage; these tokens only ever reach FetchKeys, never a verifier.
+func (suite *KeyProviderSuite) unsignedJWS(protected string) *jws.Signature {
+	enc := base64.RawURLEncoding.EncodeToString
+	compact := enc([]byte(protected)) + "." + enc([]byte(`{"sub":"test"}`)) + "." + enc([]byte("sig"))
+	return suite.signature([]byte(compact))
+}
+
+// TestMissingAlg checks the protected header without an alg, which jws.Sign
+// cannot produce, so FetchKeys is called directly.
+func (suite *KeyProviderSuite) TestMissingAlg() {
+	var (
+		kp   = suite.newKeyProvider("kid-1", &suite.privateKey.PublicKey)
+		sig  = suite.unsignedJWS(`{"kid":"kid-1"}`)
+		sink recordingSink
+	)
+
+	err := kp.FetchKeys(context.Background(), &sink, sig, nil)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrKeyProviderMissingAlg)
+	suite.Empty(sink.algs, "nothing should be offered to the sink")
+
+	// the message is unchanged from before the sentinel existed
+	suite.Equal(`protected header must contain an "alg" field`, ErrKeyProviderMissingAlg.Error())
+}
+
+// TestKeyImportError checks a ring key whose raw material jwx cannot import.
+// The error must be classifiable and must carry jwx's reason.
+func (suite *KeyProviderSuite) TestKeyImportError() {
+	var (
+		bad = &key{keyID: "kid-1", raw: "not a key"}
+		kp  = suite.newKeyProvider("kid-1", &suite.privateKey.PublicKey)
+	)
+
+	// swap the good key for the bad one under the same kid
+	kp.(*keyProvider).keyRing.Add(bad)
+
+	_, importErr := jwk.Import[jwk.Key](bad.Raw())
+	suite.Require().Error(importErr)
+
+	var sink recordingSink
+	err := kp.FetchKeys(context.Background(), &sink, suite.signature(suite.newSignedJWS("kid-1")), nil)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrKeyProviderKeyImport)
+	suite.ErrorContains(err, importErr.Error())
+	suite.Empty(sink.algs)
+
+	// and through jws.Verify, the sentinel is still reachable
+	_, err = jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
+	suite.ErrorIs(err, ErrKeyProviderKeyImport)
+}
+
+// TestKeyNotFoundMessage pins the message of the one sentinel that predates this
+// change, so that its text does not drift either.
+func (suite *KeyProviderSuite) TestKeyNotFoundMessage() {
+	suite.Equal("key provider failed to find the request kid in its keyring", ErrKeyProviderKeyNotFound.Error())
 }
 
 // TestFetchKeysOffersHeaderAlgorithm pins the contract that FetchKeys offers the
