@@ -11,10 +11,13 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
+	"github.com/lestrrat-go/jwx/v4/jws"
 	"github.com/stretchr/testify/suite"
 	"github.com/xmidt-org/clortho"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"gopkg.in/h2non/gock.v1"
 )
 
@@ -122,6 +125,70 @@ func (suite *ProvideSuite) TestResolverNoTemplate() {
 	key, err = resolver.Resolve(context.Background(), "kid-1")
 	suite.Require().NoError(err)
 	suite.Equal(suite.publicKey, key)
+}
+
+// newObservedLogger returns a logger whose warnings and above are captured.
+func (suite *ProvideSuite) newObservedLogger() (*zap.Logger, *observer.ObservedLogs) {
+	core, logs := observer.New(zap.WarnLevel)
+	return zap.New(core), logs
+}
+
+// newApplicationKeyProvider builds the kind of jws.KeyProvider an application
+// wires up by hand today, to stand in for one provided outside the module.
+func (suite *ProvideSuite) newApplicationKeyProvider() jws.KeyProvider {
+	kp, err := clortho.NewKeyProvider(clortho.WithKeyRing(clortho.NewKeyRing()))
+	suite.Require().NoError(err)
+	return kp
+}
+
+// TestKeyProviderNotice checks that an application which provides its own
+// jws.KeyProvider alongside this module is warned at startup: v0.4.0 will
+// provide one from the module, and fx refuses to start with two.  Startup itself
+// must still succeed.
+func (suite *ProvideSuite) TestKeyProviderNotice() {
+	logger, logs := suite.newObservedLogger()
+
+	app := suite.newFxTest(
+		Provide(),
+		fx.Supply(logger),
+		fx.Provide(suite.newApplicationKeyProvider),
+	)
+
+	app.RequireStart()
+	defer app.RequireStop()
+
+	entries := logs.FilterMessageSnippet("jws.KeyProvider").All()
+	suite.Require().Len(entries, 1)
+	suite.Equal(zap.WarnLevel, entries[0].Level)
+	suite.Contains(entries[0].Message, "v0.4.0")
+}
+
+// TestKeyProviderNoticeSilent checks that the warning is not emitted when the
+// application does not provide a jws.KeyProvider.
+func (suite *ProvideSuite) TestKeyProviderNoticeSilent() {
+	logger, logs := suite.newObservedLogger()
+
+	app := suite.newFxTest(
+		Provide(),
+		fx.Supply(logger),
+	)
+
+	app.RequireStart()
+	defer app.RequireStop()
+
+	suite.Empty(logs.FilterMessageSnippet("jws.KeyProvider").All())
+}
+
+// TestKeyProviderNoticeNoLogger checks that the detection tolerates an
+// application with no logger: nothing to warn through, but startup succeeds.
+func (suite *ProvideSuite) TestKeyProviderNoticeNoLogger() {
+	app := suite.newFxTest(
+		Provide(),
+		fx.Provide(suite.newApplicationKeyProvider),
+	)
+
+	app.RequireStart()
+	app.RequireStop()
 }
 
 // TODO: flesh these tests out with gock, possibly using
