@@ -77,6 +77,17 @@ func NewExpander(rawTemplate string) (Expander, error) {
 // Resolver allows synchronous resolution of keys.
 type Resolver interface {
 	// Resolve attempts to locate a key with a given keyID (kid).
+	//
+	// A fetched key is returned only if it is the one asked for.  In a key set,
+	// that means the key whose kid matches.  A single-key response must either
+	// carry the requested kid or have had no kid at all, in which case it is
+	// returned under the requested kid; a single key with a different kid is
+	// reported as ErrKeyNotFound and never reaches the ring.
+	//
+	// Every unknown kid costs a fetch, and every kid answered with a kid-less key
+	// becomes its own ring entry; the ring has no eviction.  A Resolver exposed to
+	// untrusted kids can therefore be made to fetch and grow without bound, which
+	// is why a jws.KeyProvider never consults one.
 	Resolve(ctx context.Context, keyID string) (Key, error)
 
 	// AddListener attaches a sink for ResolveEvents.  Only events that
@@ -250,7 +261,23 @@ func (r *resolver) fetchKey(ctx context.Context, keyID string) (location string,
 			err = ErrKeyNotFound
 
 		case 1:
+			// a single key is the answer to the request only if it says so.  a key
+			// whose kid came from the source and differs is a substitution, e.g. a
+			// catch-all response, and must not be returned or cached under either
+			// kid.  a key that had no kid at all is taken to be the requested one,
+			// and adopts the requested kid so the ring can serve it next time.
 			k = keys[0]
+			switch {
+			case k.KeyID() == keyID:
+				// exact match
+
+			case keyIDGenerated(k):
+				k = withKeyID(k, keyID)
+
+			default:
+				k = nil
+				err = ErrKeyNotFound
+			}
 
 		default:
 			// scan a key set looking for the key in question

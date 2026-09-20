@@ -59,6 +59,38 @@ type key struct {
 	keyUsage string
 	raw      any
 	public   crypto.PublicKey
+
+	// keyIDGenerated records that keyID was assigned by EnsureKeyID rather than
+	// present in the source material.  A Resolver uses it to tell a key that has
+	// a different kid from one that never had a kid at all.
+	keyIDGenerated bool
+}
+
+// keyIDGenerated reports whether k's key ID was assigned by EnsureKeyID.  For a
+// Key implementation other than this package's own, the answer is false: its kid
+// is taken to be authoritative.
+func keyIDGenerated(k Key) bool {
+	if kk, ok := k.(*key); ok {
+		return kk.keyIDGenerated
+	}
+
+	return false
+}
+
+// withKeyID returns a copy of k carrying the given key ID, marked as not
+// generated.  It is only meaningful for this package's own Key implementation;
+// any other Key is returned as is.
+func withKeyID(k Key, keyID string) Key {
+	kk, ok := k.(*key)
+	if !ok {
+		return k
+	}
+
+	clone := new(key)
+	*clone = *kk
+	clone.keyID = keyID
+	clone.keyIDGenerated = false
+	return clone
 }
 
 func (k *key) KeyID() string            { return k.keyID }
@@ -148,7 +180,8 @@ func appendJWKSet(js jwk.Set, keys []Key) ([]Key, error) {
 // If k already has a key ID, it is returned as is with no error.
 //
 // If k does not have a key ID, a thumbprint is generated using the supplied
-// hash.  The returned key will be a copy of k with the newly generated key ID.
+// hash.  The returned key will be a copy of k with the newly generated key ID,
+// and it remembers that the key ID was generated, which a Resolver relies on.
 // If an error occurred, then k is returned as is.
 func EnsureKeyID(k Key, h crypto.Hash) (updated Key, err error) {
 	updated = k
@@ -160,6 +193,7 @@ func EnsureKeyID(k Key, h crypto.Hash) (updated Key, err error) {
 			clone := new(key)
 			*clone = *(k.(*key))
 			clone.keyID = base64.RawURLEncoding.EncodeToString(t)
+			clone.keyIDGenerated = true
 			updated = clone
 		}
 	}
