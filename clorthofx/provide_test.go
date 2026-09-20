@@ -33,6 +33,11 @@ type ProvideSuite struct {
 
 	// publicKey is the same key as a clortho.Key, for adding to a ring directly
 	publicKey clortho.Key
+
+	// secret is a shared HMAC secret, and symmetricKey the clortho.Key holding it
+	// under kid "hmac-1", as it would arrive from a JWKS or a local file
+	secret       []byte
+	symmetricKey clortho.Key
 }
 
 func (suite *ProvideSuite) SetupSuite() {
@@ -53,6 +58,35 @@ func (suite *ProvideSuite) SetupSuite() {
 	suite.Require().NoError(err)
 	suite.Require().Len(keys, 1)
 	suite.publicKey = keys[0]
+
+	suite.secret = make([]byte, 32)
+	_, err = rand.Read(suite.secret)
+	suite.Require().NoError(err)
+
+	sk, err := jwk.Import[jwk.Key](suite.secret)
+	suite.Require().NoError(err)
+	suite.Require().NoError(sk.Set(jwk.KeyIDKey, "hmac-1"))
+	secretJWK, err := json.Marshal(sk)
+	suite.Require().NoError(err)
+
+	keys, err = p.Parse(clortho.MediaTypeJWK, secretJWK)
+	suite.Require().NoError(err)
+	suite.Require().Len(keys, 1)
+	suite.symmetricKey = keys[0]
+}
+
+// newHMACJWS signs a JWS with the suite's shared secret, carrying kid "hmac-1".
+func (suite *ProvideSuite) newHMACJWS() []byte {
+	headers := jws.NewHeaders()
+	suite.Require().NoError(headers.Set(jws.KeyIDKey, "hmac-1"))
+
+	signed, err := jws.Sign(
+		[]byte(`{"sub":"test"}`),
+		jws.WithKey(jwa.HS256(), suite.secret, jws.WithProtectedHeaders(headers)),
+	)
+
+	suite.Require().NoError(err)
+	return signed
 }
 
 // newSignedJWS signs a JWS with the suite's key, carrying kid "kid-1".
@@ -236,6 +270,57 @@ func (suite *ProvideSuite) TestKeyProviderWithRefreshSources() {
 	suite.Require().Eventually(func() bool { return kr.Len() == 1 }, 5*time.Second, 10*time.Millisecond)
 
 	payload, err := jws.Verify(suite.newSignedJWS(), jws.WithKeyProvider(kp))
+	suite.Require().NoError(err)
+	suite.JSONEq(`{"sub":"test"}`, string(payload))
+}
+
+// TestKeyProviderDefaultsApply checks that the module's provider carries the
+// core defaults: with no options supplied, a symmetric key on the ring is
+// rejected.
+func (suite *ProvideSuite) TestKeyProviderDefaultsApply() {
+	var (
+		kr clortho.KeyRing
+		kp jws.KeyProvider
+
+		app = suite.newFxTest(
+			Provide(),
+			fx.Populate(&kr, &kp),
+		)
+	)
+
+	app.RequireStart()
+	defer app.RequireStop()
+
+	kr.Add(suite.symmetricKey)
+
+	_, err := jws.Verify(suite.newHMACJWS(), jws.WithKeyProvider(kp))
+	suite.ErrorIs(err, clortho.ErrKeyProviderSymmetricKey)
+}
+
+// TestKeyProviderOptions checks that an application can pass
+// clortho.KeyProviderOption values to the module's provider, the same way it can
+// pass clortho.FetcherOption values to the fetcher.  Without this, an fx-wired
+// deployment that shares a secret through a local file has no way to opt in.
+func (suite *ProvideSuite) TestKeyProviderOptions() {
+	var (
+		kr clortho.KeyRing
+		kp jws.KeyProvider
+
+		app = suite.newFxTest(
+			Provide(),
+			fx.Supply([]clortho.KeyProviderOption{
+				clortho.WithAllowSymmetricKeys(),
+			}),
+			fx.Populate(&kr, &kp),
+		)
+	)
+
+	app.RequireStart()
+	defer app.RequireStop()
+
+	kr.Add(suite.symmetricKey)
+
+	payload, err := jws.Verify(suite.newHMACJWS(), jws.WithKeyProvider(kp))
 	suite.Require().NoError(err)
 	suite.JSONEq(`{"sub":"test"}`, string(payload))
 }
