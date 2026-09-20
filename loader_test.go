@@ -829,6 +829,27 @@ func (suite *LoaderSuite) TestDefaultBarePath() {
 	suite.Equal(ContentMeta{Format: ".pem", LastModified: fi.ModTime()}, meta)
 }
 
+// TestHTTPCacheControlMaxAgeOverflow checks that a max-age too large to hold in
+// a time.Duration is treated as absent, rather than wrapping to a negative TTL
+// whose meaning then depends on its sign.
+func (suite *LoaderSuite) TestHTTPCacheControlMaxAgeOverflow() {
+	for _, value := range []string{"max-age=9223372036854775807", "max-age=9223372036854775808", "max-age=-5"} {
+		suite.Run(value, func() {
+			defer gock.Off()
+			gock.New(testHTTPSGet).
+				Get("/keys").
+				Reply(http.StatusOK).
+				SetHeader("Content-Type", MediaTypeJWKSet).
+				SetHeader("Cache-Control", value).
+				BodyString(keyContent)
+
+			_, meta, err := suite.newLoader().LoadContent(context.Background(), testHTTPSGet)
+			suite.Require().NoError(err)
+			suite.Equal(ContentMeta{Format: MediaTypeJWKSet}, meta)
+		})
+	}
+}
+
 func TestLoader(t *testing.T) {
 	suite.Run(t, new(LoaderSuite))
 }

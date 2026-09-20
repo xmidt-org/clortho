@@ -281,9 +281,13 @@ func (hl *HTTPLoader) newMeta(resp *http.Response) ContentMeta {
 		for cacheDirective := range strings.SplitSeq(cacheControl, ",") {
 			nv := strings.Split(cacheDirective, "=")
 			if strings.TrimSpace(nv[0]) == "max-age" && len(nv) > 1 {
-				// ignore an invalid max-age directive, just treat it as if there were no Cache-Control header
-				if seconds, err := strconv.Atoi(nv[1]); err == nil {
-					meta.TTL = time.Duration(seconds) * time.Second
+				// ignore an invalid max-age directive, just treat it as if there were no
+				// Cache-Control header.  that includes a negative value and one too large
+				// to hold in a time.Duration, which would otherwise wrap to a negative TTL.
+				if seconds, err := strconv.ParseInt(strings.TrimSpace(nv[1]), 10, 64); err == nil {
+					if seconds >= 0 && seconds <= math.MaxInt64/int64(time.Second) {
+						meta.TTL = time.Duration(seconds) * time.Second
+					}
 				}
 
 				// only use the first max-age directive, in case of duplicates
