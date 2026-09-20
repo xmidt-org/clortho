@@ -26,6 +26,11 @@ var (
 	// key cannot be offered for verification under any algorithm.
 	ErrKeyProviderMissingAlg = errors.New(`protected header must contain an "alg" field`)
 
+	// ErrKeyProviderKeyUsage indicates that the key found on the ring is marked, via
+	// its JWK "use" member, for something other than signature verification.  This is
+	// only reported when the provider was built with WithEnforceKeyUsage.
+	ErrKeyProviderKeyUsage = errors.New("key is not marked for signature use")
+
 	// ErrKeyProviderKeyImport indicates that the key found on the ring could not be
 	// converted into a form jwx can verify with.  It is joined with the jwx error.
 	ErrKeyProviderKeyImport = errors.New("key provider could not import the key from its keyring")
@@ -80,6 +85,11 @@ func NewKeyProvider(opts ...KeyProviderOption) (jws.KeyProvider, error) {
 
 type keyProvider struct {
 	keyRing KeyRing
+
+	// enforceKeyUsage rejects keys whose "use" is set to anything other than sig.
+	// Off by default, so that existing deployments keep verifying with keys their
+	// JWKS marks for encryption; see WithEnforceKeyUsage.
+	enforceKeyUsage bool
 }
 
 func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.Signature, _ *jws.Message) error {
@@ -99,19 +109,18 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 		return fmt.Errorf("%w: kid `%q` not found in keyring", ErrKeyProviderKeyNotFound, kid)
 	}
 
+	// The "use" member lives on the clortho Key, which kept it from the JWKS.  The
+	// jwx key rebuilt below from raw material never carries one, so the check has
+	// to happen here.
+	if kp.enforceKeyUsage {
+		if usage := ckey.KeyUsage(); usage != "" && usage != jwk.ForSignature.String() {
+			return fmt.Errorf(`%w: key with kid %q is marked use=%q (expected %q)`, ErrKeyProviderKeyUsage, kid, usage, jwk.ForSignature.String())
+		}
+	}
+
 	key, err := jwk.Import[jwk.Key](ckey.Raw())
 	if err != nil {
 		return errors.Join(ErrKeyProviderKeyImport, err)
-	}
-
-	if uk, ok := key.(jwk.UnsupportedKey); ok {
-		return fmt.Errorf(`key with "kid" %q from clortho keyring has unsupported key type %q and cannot be used for signature verification; an extension module may be required to parse it: %w`, kid, uk.KeyType().String(), uk.Reason())
-	}
-
-	if usage, ok := key.KeyUsage(); ok {
-		if usage != "" && usage != jwk.ForSignature.String() {
-			return fmt.Errorf(`key with kid %q is marked use=%q, not usable for signature verification (expected %q)`, kid, usage, jwk.ForSignature.String())
-		}
 	}
 
 	hdrAlg, ok := sig.ProtectedHeaders().Algorithm()
