@@ -142,9 +142,14 @@ func WithKeyIDValidator(v func(keyID string) error) ResolverOption {
 // WithKeyIDExpander establishes the Expander strategy used for resolving
 // individual keys.  Callers may use this option to associate a custom
 // Expander with a Resolver.
+//
+// A custom Expander has no template for the Resolver to derive an origin from,
+// so the location check described at WithKeyIDTemplate does not apply; the
+// Expander is responsible for never letting a key ID choose the destination.
 func WithKeyIDExpander(e Expander) ResolverOption {
 	return resolverOptionFunc(func(r *resolver) error {
 		r.keyIDExpander = e
+		r.origin = nil
 		return nil
 	})
 }
@@ -152,18 +157,34 @@ func WithKeyIDExpander(e Expander) ResolverOption {
 // WithKeyIDTemplate establishes the URI template used for resolving
 // individual keys.  An empty template yields a ring-only Resolver whose
 // misses report ErrNoTemplate; see NewResolver.
+//
+// The template must begin with a literal scheme and, for http and https, a
+// literal host, and its variable must come after the path begins, e.g.
+// https://keys.example.com/{keyID} or file:///etc/keys/{keyID}.pem.  Every
+// expansion is then checked to stay within that scheme, host, and path prefix,
+// so a key ID cannot change where keys are fetched from whatever it contains.
+// A template that puts its variable in the host, such as
+// https://{keyID}.example.com/, or that is only the variable, is rejected with
+// ErrUnsafeTemplate.
 func WithKeyIDTemplate(t string) ResolverOption {
 	return resolverOptionFunc(func(r *resolver) error {
 		if len(t) == 0 {
 			return WithKeyIDExpander(noTemplateExpander{}).applyToResolver(r)
 		}
 
-		e, err := NewExpander(t)
-		if err == nil {
-			err = WithKeyIDExpander(e).applyToResolver(r)
+		origin, err := parseTemplateOrigin(t)
+		if err != nil {
+			return err
 		}
 
-		return err
+		e, err := NewExpander(t)
+		if err != nil {
+			return err
+		}
+
+		r.keyIDExpander = e
+		r.origin = origin
+		return nil
 	})
 }
 

@@ -111,6 +111,11 @@ type ResolveConfig struct {
 	// Template is a URI template used to fetch keys.  This template may
 	// use a single parameter named keyID, e.g. http://keys.com/{keyID}.
 	//
+	// The template must begin with a literal scheme and host, and the keyID
+	// parameter must come after the path begins; a template that lets the key ID
+	// decide the host, or that is only the parameter, is rejected with
+	// ErrUnsafeTemplate.  See WithKeyIDTemplate.
+	//
 	// If empty, a Resolver built from this configuration serves only keys
 	// already on its ring, and reports ErrNoTemplate for any other key ID.
 	Template string `json:"template" yaml:"template"`
