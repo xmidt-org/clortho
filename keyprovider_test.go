@@ -499,18 +499,6 @@ func (suite *KeyProviderSuite) TestWithRefreshSources() {
 	suite.JSONEq(`{"sub":"test"}`, string(payload))
 }
 
-// TestDeprecatedWithRingKey pins the deprecated alias: it must keep working
-// exactly like WithKeyRing until it is removed.
-func (suite *KeyProviderSuite) TestDeprecatedWithRingKey() {
-	kp, err := NewKeyProvider(WithRingKey(suite.newRingWith("kid-1"))) //nolint:staticcheck // deliberately exercising the alias
-	suite.Require().NoError(err)
-	suite.Require().NotNil(kp)
-
-	payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
-	suite.Require().NoError(err)
-	suite.JSONEq(`{"sub":"test"}`, string(payload))
-}
-
 // TestKeyUsageEnforcedByDefault pins the default: a key marked for a use other
 // than signing is rejected with no option given, matching RFC 7517 section 4.2
 // and jwx's own key set provider.
