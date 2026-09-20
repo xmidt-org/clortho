@@ -14,7 +14,21 @@ import (
 )
 
 var (
+	// ErrKeyProviderKeyNotFound indicates that the kid in the protected header is not
+	// on the key ring.
 	ErrKeyProviderKeyNotFound = errors.New("key provider failed to find the request kid in its keyring")
+
+	// ErrKeyProviderMissingKeyID indicates that the protected header has no kid, so
+	// there is nothing to look up on the ring.
+	ErrKeyProviderMissingKeyID = errors.New(`payload must contain a "kid" field in its protected header`)
+
+	// ErrKeyProviderMissingAlg indicates that the protected header has no alg, so the
+	// key cannot be offered for verification under any algorithm.
+	ErrKeyProviderMissingAlg = errors.New(`protected header must contain an "alg" field`)
+
+	// ErrKeyProviderKeyImport indicates that the key found on the ring could not be
+	// converted into a form jwx can verify with.  It is joined with the jwx error.
+	ErrKeyProviderKeyImport = errors.New("key provider could not import the key from its keyring")
 
 	// ErrKeyProviderNoKeyRing indicates that no KeyRing was supplied to NewKeyProvider.
 	// A key ring is required, as it is the only source of keys for verification.
@@ -77,7 +91,7 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 
 	kid, ok := sig.ProtectedHeaders().KeyID()
 	if !ok {
-		return fmt.Errorf(`payload must contain a "kid" field in its protected header`)
+		return ErrKeyProviderMissingKeyID
 	}
 
 	ckey, ok := kp.keyRing.Get(kid)
@@ -87,7 +101,7 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 
 	key, err := jwk.Import[jwk.Key](ckey.Raw())
 	if err != nil {
-		return err
+		return errors.Join(ErrKeyProviderKeyImport, err)
 	}
 
 	if uk, ok := key.(jwk.UnsupportedKey); ok {
@@ -102,7 +116,7 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 
 	hdrAlg, ok := sig.ProtectedHeaders().Algorithm()
 	if !ok {
-		return fmt.Errorf(`protected header must contain an "alg" field`)
+		return ErrKeyProviderMissingAlg
 	}
 
 	// Offer the key under the header's algorithm and let jws.Verify decide whether
