@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -848,6 +849,157 @@ func (suite *LoaderSuite) TestHTTPCacheControlMaxAgeOverflow() {
 			suite.Equal(ContentMeta{Format: MediaTypeJWKSet}, meta)
 		})
 	}
+}
+
+// withCredentials inserts a user and password into an httptest server URL.
+func withCredentials(serverURL string) string {
+	return strings.Replace(serverURL, "http://", "http://user:hunter2@", 1)
+}
+
+// TestHTTPLoaderErrorRedactsCredentials checks that a status error names the
+// source without its password.
+func (suite *LoaderSuite) TestHTTPLoaderErrorRedactsCredentials() {
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	_, _, err := suite.newLoader().LoadContent(context.Background(), withCredentials(server.URL)+"/keys")
+	suite.Require().Error(err)
+
+	var hle *HTTPLoaderError
+	suite.Require().ErrorAs(err, &hle)
+	suite.Contains(hle.Location, "user:xxxxx@")
+	suite.NotContains(err.Error(), "hunter2")
+}
+
+// TestResponseTooLargeErrorRedactsCredentials checks the same for the read
+// limit error.
+func (suite *LoaderSuite) TestResponseTooLargeErrorRedactsCredentials() {
+	server := suite.newSizedServer(keyContent)
+	defer server.Close()
+
+	_, _, err := suite.newLimitedLoader(int64(len(keyContent)-1)).LoadContent(context.Background(), withCredentials(server.URL)+"/keys")
+	suite.Require().Error(err)
+
+	var rtle *ResponseTooLargeError
+	suite.Require().ErrorAs(err, &rtle)
+	suite.Contains(rtle.Location, "user:xxxxx@")
+	suite.NotContains(err.Error(), "hunter2")
+}
+
+// TestLocationErrorsRedactCredentials checks the two errors built from the raw
+// location string rather than from a request.
+func (suite *LoaderSuite) TestLocationErrorsRedactCredentials() {
+	_, _, err := suite.newLoader().LoadContent(context.Background(), "ftp://user:hunter2@example.com/keys")
+	suite.Require().Error(err)
+
+	var use *UnsupportedSchemeError
+	suite.Require().ErrorAs(err, &use)
+	suite.Contains(use.Location, "user:xxxxx@")
+	suite.NotContains(err.Error(), "hunter2")
+
+	// a directory, so the file loader reports NotAFileError with the location
+	_, _, err = suite.newLoader().LoadContent(context.Background(), "file://user:hunter2@"+suite.T().TempDir())
+	suite.Require().Error(err)
+
+	var nafe *NotAFileError
+	suite.Require().ErrorAs(err, &nafe)
+	suite.Contains(nafe.Location, "user:xxxxx@")
+	suite.NotContains(err.Error(), "hunter2")
+}
+
+// TestRedactURI pins the helper: a parseable URI is redacted by the standard
+// library, one that does not parse is redacted textually, and anything without
+// a password is returned unchanged.
+func (suite *LoaderSuite) TestRedactURI() {
+	testCases := []struct {
+		in, expected string
+	}{
+		{"https://user:hunter2@example.com/keys", "https://user:xxxxx@example.com/keys"},         //nolint:gosec // test fixture, not a credential
+		{"https://user:hunter2@{keyID}.example.com/", "https://user:xxxxx@{keyID}.example.com/"}, //nolint:gosec // test fixture, not a credential
+		{"https://user:hunter2@example.com/\x7f", "https://user:xxxxx@example.com/\x7f"},         //nolint:gosec // test fixture, not a credential
+		{"https://user@example.com/keys", "https://user@example.com/keys"},
+		{"https://example.com/keys", "https://example.com/keys"},
+		{"/etc/keys/key.pem", "/etc/keys/key.pem"},
+		{"not a uri at all", "not a uri at all"},
+		{"", ""},
+	}
+
+	for _, tc := range testCases {
+		suite.Equal(tc.expected, redactURI(tc.in), tc.in)
+	}
+}
+
+// TestHTTPInvalidLocation checks that a configured URI the HTTP client cannot
+// parse fails before any request is built, and that the failure does not quote
+// the raw location.  This is the one place a password could still have leaked,
+// through the standard library's own parse error.
+func (suite *LoaderSuite) TestHTTPInvalidLocation() {
+	_, _, err := suite.newLoader().LoadContent(context.Background(), "http://user:hunter2@example.com/\x7f") //nolint:gosec // test fixture, not a credential
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrInvalidLocation)
+	suite.Contains(err.Error(), "user:xxxxx@")
+	suite.NotContains(err.Error(), "hunter2")
+}
+
+// TestHTTPEncoderChangesMethod checks that when an encoder turns the request
+// into something other than GET or HEAD, no conditional headers are added,
+// since they have no meaning for other methods.
+func (suite *LoaderSuite) TestHTTPEncoderChangesMethod() {
+	var (
+		client  = new(http.Client)
+		encoder = HTTPEncoder(func(_ context.Context, r *http.Request) error {
+			r.Method = http.MethodPost
+			return nil
+		})
+
+		l = suite.newLoader(
+			WithSchemes(
+				HTTPLoader{
+					Client:       client,
+					Encoders:     []HTTPEncoder{encoder},
+					MaxReadLimit: int64(1 * 1024 * 25),
+				},
+				"https",
+			),
+		)
+	)
+
+	defer gock.Off()
+	defer gock.RestoreClient(client)
+	gock.InterceptClient(client)
+	gock.New(testHTTPSGet).
+		Post("/keys").
+		AddMatcher(func(req *http.Request, _ *gock.Request) (bool, error) {
+			return req.Header.Get("If-Modified-Since") == "", nil
+		}).
+		Reply(http.StatusOK).
+		BodyString(keyContent).
+		SetHeader("Content-Type", MediaTypeJWK)
+
+	content, meta, err := l.LoadContent(
+		SetContentMeta(context.Background(), ContentMeta{LastModified: time.Now()}),
+		testHTTPSGet,
+	)
+
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: MediaTypeJWK}, meta)
+	suite.True(gock.IsDone())
+}
+
+// TestHTTPNilContext checks that, for a loader with no timeout (a loader with
+// one panics in context.WithTimeout first, as any nil parent does), a nil
+// context is reported by the request constructor, and that the error carries
+// no location.
+func (suite *LoaderSuite) TestHTTPNilContext() {
+	l := suite.newLoader(WithSchemes(HTTPLoader{Client: http.DefaultClient}, "http"))
+
+	//nolint:staticcheck // passing a nil context deliberately
+	_, _, err := l.LoadContent(nil, "http://user:hunter2@example.com/keys") //nolint:gosec // test fixture, not a credential
+	suite.Require().Error(err)
+	suite.NotContains(err.Error(), "hunter2")
 }
 
 func TestLoader(t *testing.T) {

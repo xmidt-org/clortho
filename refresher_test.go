@@ -456,6 +456,46 @@ func (suite *RefresherSuite) TestMultipleSourceErrors() {
 	suite.ErrorContains(err, "duplicate refresh source URI")
 }
 
+// TestRefreshEventRedactsCredentials checks that a refresh event names its
+// source without the password, while the fetch itself still uses the URI as
+// configured.
+func (suite *RefresherSuite) TestRefreshEventRedactsCredentials() {
+	const (
+		source   = "https://user:hunter2@example.net/keys" //nolint:gosec // test fixture, not a credential
+		redacted = "https://user:xxxxx@example.net/keys"   //nolint:gosec // test fixture, not a credential
+	)
+
+	var (
+		f        = new(mockFetcher)
+		listener = new(mockRefreshListener)
+		r        = suite.newRefresher(
+			WithFetcher(f),
+			WithSources(RefreshSource{URI: source}),
+		)
+
+		fc      = suite.newClockFor(r)
+		timerCh = make(chan chronon.FakeTimer, 1)
+	)
+
+	fc.NotifyOnTimer(timerCh)
+	r.AddListener(listener)
+
+	f.ExpectFetchCtx(func(context.Context) bool { return true }, source).
+		Return(suite.set1, ContentMeta{}, nil).
+		Once()
+
+	listener.On("OnRefreshEvent", mock.MatchedBy(func(e RefreshEvent) bool {
+		return e.URI == redacted
+	})).Once()
+
+	suite.Require().NoError(r.Start(context.Background()))
+	suite.getTimer(timerCh)
+	suite.Require().NoError(r.Stop(context.Background()))
+
+	f.AssertExpectations(suite.T())
+	listener.AssertExpectations(suite.T())
+}
+
 func TestRefresher(t *testing.T) {
 	suite.Run(t, new(RefresherSuite))
 }

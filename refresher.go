@@ -23,7 +23,7 @@ var (
 // RefreshEvent represents a set of keys from a given URI that has been
 // asynchronously fetched.
 type RefreshEvent struct {
-	// URI is the source of the keys.
+	// URI is the source of the keys, with any password in its userinfo redacted.
 	URI string
 
 	// Err is the error that occurred while trying to interact with the URI.
@@ -227,7 +227,7 @@ func (rt *refreshTask) run(ctx context.Context) {
 	)
 
 	for {
-		event := RefreshEvent{URI: rt.source.URI}
+		event := RefreshEvent{URI: redactURI(rt.source.URI)}
 		nextKeys, meta, err := rt.fetcher.Fetch(SetContentMeta(ctx, prevMeta), rt.source.URI)
 		next := rt.jitterer.nextInterval(ContentMeta{}, err)
 		if err == nil {

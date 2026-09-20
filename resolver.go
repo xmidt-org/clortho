@@ -53,7 +53,9 @@ var (
 
 // ResolveEvent holds information about a key ID that has been resolved.
 type ResolveEvent struct {
-	// URI is the actual, expanded URI used to obtain the key material.
+	// URI is the actual, expanded URI used to obtain the key material, with any
+	// password in its userinfo redacted.  It is empty when the key ID was rejected
+	// before expansion.
 	URI string
 
 	// KeyID is the key ID that was resolved.
@@ -126,17 +128,19 @@ func parseTemplateOrigin(rawTemplate string) (*templateOrigin, error) {
 		prefix = rawTemplate[:i]
 	}
 
+	// messages quote the template redacted: a credentialed template that is
+	// rejected must not put its password in the startup log
 	u, err := url.Parse(prefix)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnsafeTemplate, err)
+		return nil, fmt.Errorf("%w: %q could not be parsed before its variable", ErrUnsafeTemplate, redactURI(rawTemplate))
 	}
 
 	switch {
 	case u.Scheme == "":
-		return nil, fmt.Errorf("%w: %q has no scheme before its variable", ErrUnsafeTemplate, rawTemplate)
+		return nil, fmt.Errorf("%w: %q has no scheme before its variable", ErrUnsafeTemplate, redactURI(rawTemplate))
 
 	case (u.Scheme == "http" || u.Scheme == "https") && u.Host == "":
-		return nil, fmt.Errorf("%w: %q has no host before its variable", ErrUnsafeTemplate, rawTemplate)
+		return nil, fmt.Errorf("%w: %q has no host before its variable", ErrUnsafeTemplate, redactURI(rawTemplate))
 
 	case u.Host == "" && u.Path == "" && u.Opaque != "":
 		// an opaque form, e.g. urn:keys:{keyID}; the literal opaque part is the prefix
@@ -147,7 +151,7 @@ func parseTemplateOrigin(rawTemplate string) (*templateOrigin, error) {
 		}, nil
 
 	case u.Path == "":
-		return nil, fmt.Errorf("%w: %q places its variable before the path begins", ErrUnsafeTemplate, rawTemplate)
+		return nil, fmt.Errorf("%w: %q places its variable before the path begins", ErrUnsafeTemplate, redactURI(rawTemplate))
 	}
 
 	return &templateOrigin{
@@ -179,9 +183,11 @@ func canonicalPath(p string) bool {
 
 // check reports whether an expanded location stays within the origin.
 func (to *templateOrigin) check(location string) error {
+	// the standard library's parse error quotes its input, so it is not wrapped;
+	// the location is quoted redacted instead
 	u, err := url.Parse(location)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrLocationOutsideTemplate, err)
+		return fmt.Errorf("%w: %q could not be parsed", ErrLocationOutsideTemplate, redactURI(location))
 	}
 
 	inside := u.Scheme == to.scheme
@@ -192,7 +198,7 @@ func (to *templateOrigin) check(location string) error {
 	}
 
 	if !inside {
-		return fmt.Errorf("%w: %q is not under %s", ErrLocationOutsideTemplate, location, to.String())
+		return fmt.Errorf("%w: %q is not under %s", ErrLocationOutsideTemplate, u.Redacted(), to.String())
 	}
 
 	return nil
@@ -516,7 +522,7 @@ func (r *resolver) Resolve(ctx context.Context, keyID string) (k Key, err error)
 	location, k, err = r.fetchAndRelease(ctx, keyID, request)
 
 	r.dispatch(ResolveEvent{
-		URI:   location,
+		URI:   redactURI(location),
 		Key:   k,
 		KeyID: keyID,
 		Err:   err,
