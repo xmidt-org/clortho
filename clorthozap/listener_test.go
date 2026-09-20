@@ -4,370 +4,112 @@
 package clorthozap
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xmidt-org/clortho"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
-const (
-	testURL    = "https://example.com"
-	testFooURL = "https://example.com/foo"
-
-	// keys is a jwk set used to stand-in for an event's Keys field
-	keys = `{
-    "keys": [
-        {
-		    "kid": "A",
-            "p": "yD2VKf9BGOHp1dbWKg7m4dccMnYvxCrzpq6S3-cO9egK6IJYFeA5AidCsAZiQaVuFCigoFgelEQIatjjcNdhZE_ideul7xjIkaoj6AJ48nZheYmvunKDUIus_3UqV18tJ7Lofiz0u5dVZe_R9NbYH4n53lX7fcOLMcIuHkIP2f8",
-            "kty": "RSA",
-            "q": "wK5h6m64OBedeRA1Kq-Uqjg5rzeBuXhfOHiOSB6yCdMTbgtRmouUYdm-eQ61f1B2YtZY2sl35AibzD8FALR9FxHb9fe1EkJ9GJBZVmJA9Aazd4f71SOJ7vcWlgo5awDH3dv4Mn_NgiRkLLedADvB9HxWcTxjYeXkEEqPHUmlb_U",
-            "d": "hpz_FlBnWDop_JzW6EGwQV3sM2nvU-8HfjquekXe5xju0rISoYzX7qxvI3uXkzJeWsOnYpI5RdWXGgfzCDlhPP5SLml9kYbqTjzbOVSmXBrgTPF1MNdeYH-DiGu2rfh8WO7ziGMybTmEZ7DWm6Y3jYI-Bm3dWhW_8FX2FQbOIUJlX82Z25lKepaNPAUOywM7mf4BVLwroYIyc1iB8tTFtdNnRMou1IsAn-FEkySp9I2AnmPlVEuoRHo4TBonb-b4clMrsWoB3NLfNDbgrTrFTd3z6SRSKVTJbxqR-EODumhUK0KRiKX36N6-pvPvDsAEoaCUTH63HLAUaSqWN_yvwQ",
-            "e": "AQAB",
-            "qi": "dcm8P4aN5RRYR-4M-9Z4VWUlF7dXLR3TN-BNOvhQHB22vGwbtLQhpL0NY1ppl-FtCr4ExXXahYIAp-Lmsw4fnqbiCsXTXn93Boa1pJopB2R-JCf2_fyoJg0Slsjb2yqjqwW8M9h1uiojHeyxuDOay8z3yzbgXt8w4NeUEC4spUs",
-            "dp": "iSvepjFtB72i8VFFzvP8aBNzBoJ-AFUoKjQG-4kOb5hw-IxqCTpb80Sv42PMJYpNGVQnjRAwioL8fS1syR1SY2RyDzPJrTv-EgNKq6Id9oLwDVEr536QxDma3jkGM2pIxZxCtkTXtjZaUwVxf9c5oIlleVDPgnzVOtX5v9Kjh0M",
-            "dq": "E2L4UyAkxPALVhz9XHgiGyZhF3IcSU8FNadbmYINI9PrBo14_nXAzj-cXI3QUSkFYFh0xD61I2qCUoCcvj9qvqF7Yjo0K8wozgnoEzr7khICiKpT-lQDEtolmZ8Zu9xuP7JcPKiDQu7qbV1kHJvmnfTMtcP_s9_vnHwD_kxkquk",
-            "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw"
-        },
-        {
-		    "kid": "B",
-            "kty": "EC",
-            "d": "pEKRYzqBzvAfIlPxppQG8hSxtJxRm-DLqpCPjx26bEDwCIz2JdISM-lGV1euPIhl",
-            "crv": "P-384",
-            "x": "jhH5USR4IO3uaURYSn4z8IDn7MnWGGa76eNZTvI8Zc08XSQ0YzikcZtLAVUw1zoc",
-            "y": "uILRhb6eP2PnfSk1xBdttboPXJO_o21Ho0Tb5de6kb46BGaVLPD-RC6zJ2KmYWIm"
-        }
-    ]
-}`
-
-	// newKeys is a jwk set intended to stand in for an event's New field
-	newKeys = `{
-    "keys": [
-        {
-            "kid": "C",
-            "kty": "EC",
-            "d": "AK88liJbuM-sg_6EqvzKLFaMt0oIvDXucmnwK8Vza7JAR0Sal4W0kdiPVpbxcrHsx1M8bx8qP-dQFkBc3dpO7fxY",
-            "crv": "P-521",
-            "x": "AScg7sADU-hQFjnmhekzqLpRKj4XXUd2jJQNGfGkQT4bC4FArVvP0vamuLsABiqZr4QqXPj_ilWvNDh8umRVxU5c",
-            "y": "AF_9M9_DK0sfAdIzVUvGsOSZPfNavvYZiJAwqGnRNdzjH2r1VantDqoYftFqsd6c50NKYraRXmdverwBci5_VuA3"
-        },
-        {
-            "kid": "D",
-            "kty": "OKP",
-            "d": "283roMFHvoICtcZJC5DsdkHLJMNYWD4z-u-LmyHakmg",
-            "crv": "Ed25519",
-            "x": "mNGL9p0Ll7e6HXXVYUJ2Vb1zKT5Uw6vIihG7urY2bpY"
-        }
-    ]
-}`
-
-	// deletedKeys is a jwk set that stands in for an event's Deleted field
-	deletedKeys = `{
-    "keys": [
-        {
-            "kid": "E",
-            "kty": "oct",
-            "k": "yRE408XjhgbOtiyMRoNm7xEKqibpDYPY0m1pNRYy_VoTGw3l6Fnhhvi6lUwOLjix4pxH9jQpsg531oxonQ_Guq3bm3zyUI_cBXVwtmg1lDTMjo06YRdrOjtj4f-61pCZfz7xc-GYf9uoyxgtb2yIxQq1cve37qtoUhkoGtkO13TmtFTpxtc8ueWSt7Arp2zCrrIu9jrF2xKQNL4P6P0TNfUWjE4E42AqI8Ux4TEBAyh_lVkicVDeQJrvNJ3j6toNDBfuScdJGxrklhprapWrhBYTMRMtBYvkcZwxx8YTfsBBvLUTyl4U1-xjJMekJe3bF1mwDz9gOaREjEkzJjxaJw"
-        },
-        {
-            "p": "3zv6eF8jeXk9WVk8edMgXVw2rwQlddo4fuy6ZXUwRLJLjJhQsBfcL2KcWR2_HGL9TltjTPfAWubYhCTBJTZf9Q",
-            "kty": "RSA",
-            "q": "0_IHxLuP1Wb8Uhta0REciA2Sn71RCRITVX-p-IzvB2ALTkohynMrtW28hWVGrWbSqaCrn4Ng519APkOHAgWK8Q",
-            "d": "rhRbhTOHMt_YFOM_lBJyJcd0ggC4poLShxVrNS3aSUGb_8oQpPHVV9E0X4dA-awKDiL6Pt54R1bmmpIGk6K9mhcD82wZlXTWqk1E-vSvU9PgB8SvPQBDVecBSCb1uciPKh4QDBHNydaZZ1ANAFW9wDrMuw-xJpCEY-zrEPEW1ME",
-            "e": "AQAB",
-            "kid": "F",
-            "qi": "1Lgvy6YUKvoGOEXlDIARvlCckDZuo6HzsP8ozdmMnyRLiAjTwkv67r8_aqd-XJnbZxPTWtIxukraqdtvlKy8Aw",
-            "dp": "ENSHzL13gjgGzQ6yRYkKXp-OK-HHJTx_l-onH3EXY4aBtabiJnSWECiCGyHn_67i5B51vR7MrM3MsyHGQhT4ZQ",
-            "dq": "mU9jyy0Zd_ZM4l-jK8PC7a9TtnTNH1CR57C3FHFtndodk34QP09b-JruWVfO7jOIgucT_gicmgDOibty90VnIQ",
-            "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw"
-        }
-    ]
-}`
-)
-
-// errorListenerOption is a ListenerOption that returns an error.
-// This type is necessary because we currently don't have an option
-// that we can test NewListener when it returns an error.
+// errorListenerOption is a ListenerOption that returns an error, since no
+// real option can fail.
 type errorListenerOption struct {
-	expectedError error
+	err error
 }
 
-func (elo errorListenerOption) applyToListener(l *Listener) error {
-	return elo.expectedError
+func (elo errorListenerOption) applyToListener(*Listener) error { return elo.err }
+
+// observed returns a logger that records entries at or above level.
+func observed(level zapcore.Level) (*zap.Logger, *observer.ObservedLogs) {
+	core, logs := observer.New(level)
+	return zap.New(core), logs
 }
 
-type ListenerSuite struct {
-	suite.Suite
-
-	keys        clortho.Keys
-	newKeys     clortho.Keys
-	deletedKeys clortho.Keys
+// fields flattens an entry's fields into a map for assertions.  Arrays come
+// back as []any and an error as its message.
+func fields(entry observer.LoggedEntry) map[string]any {
+	return entry.ContextMap()
 }
 
-func (suite *ListenerSuite) SetupSuite() {
-	p, err := clortho.NewParser()
-	suite.Require().NoError(err)
-	suite.Require().NotNil(p)
-
-	suite.keys, err = p.Parse(clortho.MediaTypeJWKSet, []byte(keys))
-	suite.Require().NoError(err)
-	suite.Require().Len(suite.keys, 2)
-
-	suite.newKeys, err = p.Parse(clortho.MediaTypeJWKSet, []byte(newKeys))
-	suite.Require().NoError(err)
-	suite.Require().Len(suite.newKeys, 2)
-
-	suite.deletedKeys, err = p.Parse(clortho.MediaTypeJWKSet, []byte(deletedKeys))
-	suite.Require().NoError(err)
-	suite.Require().Len(suite.deletedKeys, 2)
+func TestNewListenerDefaults(t *testing.T) {
+	l, err := NewListener()
+	require.NoError(t, err)
+	require.NotNil(t, l)
+	assert.NotNil(t, l.logger)
+	assert.Equal(t, zap.InfoLevel, l.level)
 }
 
-func (suite *ListenerSuite) unmarshalEntry(b *bytes.Buffer) (m map[string]any) {
-	suite.Require().NotEmpty(b.Bytes())
-	suite.Require().NoError(json.Unmarshal(b.Bytes(), &m))
-	return
+func TestNewListenerOptionError(t *testing.T) {
+	expected := errors.New("expected")
+	l, err := NewListener(errorListenerOption{err: expected})
+	assert.Nil(t, l)
+	assert.ErrorIs(t, err, expected)
 }
 
-func (suite *ListenerSuite) assertRefreshEntry(b *bytes.Buffer, expectedEvent clortho.RefreshEvent, expectedLevel zapcore.Level) {
-	m := suite.unmarshalEntry(b)
+func TestOnRefreshEventSuccess(t *testing.T) {
+	logger, logs := observed(zapcore.InfoLevel)
+	l, err := NewListener(WithLogger(logger))
+	require.NoError(t, err)
 
-	suite.Equal(expectedEvent.URI, m["uri"])
-	suite.ElementsMatch(expectedEvent.Keys.AppendKeyIDs(nil), m["keys"])
-	suite.ElementsMatch(expectedEvent.New.AppendKeyIDs(nil), m["new"])
-	suite.ElementsMatch(expectedEvent.Deleted.AppendKeyIDs(nil), m["deleted"])
-	suite.Equal(expectedLevel.String(), m["level"])
-
-	if expectedEvent.Err != nil {
-		suite.Equal(expectedEvent.Err.Error(), m["error"])
-	} else {
-		suite.Nil(m["error"])
-	}
-}
-
-func (suite *ListenerSuite) assertResolveEntry(b *bytes.Buffer, expectedEvent clortho.ResolveEvent, expectedLevel zapcore.Level) {
-	m := suite.unmarshalEntry(b)
-
-	suite.Equal(expectedEvent.URI, m["uri"])
-	suite.Equal(expectedEvent.KeyID, m["keyID"])
-	suite.Equal(expectedLevel.String(), m["level"])
-
-	if expectedEvent.Err != nil {
-		suite.Equal(expectedEvent.Err.Error(), m["error"])
-	} else {
-		suite.Nil(m["error"])
-	}
-}
-
-// newTestLogger creates a logger with the given level enabled and standard log message keys.
-// The returned *bytes.Buffer can be used to examine log output.
-func (suite *ListenerSuite) newTestLogger(level zapcore.Level) (*zap.Logger, *bytes.Buffer) {
-	b := new(bytes.Buffer)
-	return zap.New(
-		zapcore.NewCore(
-			zapcore.NewJSONEncoder(zapcore.EncoderConfig{
-				MessageKey:  "msg",
-				LevelKey:    "level",
-				EncodeLevel: zapcore.LowercaseLevelEncoder, // this matches Level.String()
-			}),
-			zapcore.AddSync(b),
-			level,
-		),
-	), b
-}
-
-func (suite *ListenerSuite) newListener(options ...ListenerOption) *Listener {
-	listener, err := NewListener(options...)
-	suite.Require().NoError(err)
-	suite.Require().NotNil(listener)
-	return listener
-}
-
-func (suite *ListenerSuite) testOnRefreshEventNoError() {
-	testCases := []struct {
-		description string
-		event       clortho.RefreshEvent
-	}{
-		{
-			description: "keys only",
-			event: clortho.RefreshEvent{
-				URI:  testURL,
-				Keys: suite.keys,
-			},
-		},
-		{
-			description: "keys and new",
-			event: clortho.RefreshEvent{
-				URI:  testURL,
-				Keys: suite.keys,
-				New:  suite.newKeys,
-			},
-		},
-		{
-			description: "keys and deleted",
-			event: clortho.RefreshEvent{
-				URI:     testURL,
-				Keys:    suite.keys,
-				Deleted: suite.deletedKeys,
-			},
-		},
-		{
-			description: "all",
-			event: clortho.RefreshEvent{
-				URI:     testURL,
-				Keys:    suite.keys,
-				New:     suite.newKeys,
-				Deleted: suite.deletedKeys,
-			},
-		},
-	}
-
-	for _, testCase := range testCases {
-		suite.Run(testCase.description, func() {
-			suite.Run("DefaultLevel", func() {
-				suite.Run(testCase.description, func() {
-					var (
-						logger, output = suite.newTestLogger(zapcore.InfoLevel)
-						listener       = suite.newListener(WithLogger(logger))
-					)
-
-					suite.Empty(output.Bytes())
-					listener.OnRefreshEvent(testCase.event)
-					suite.assertRefreshEntry(output, testCase.event, zapcore.InfoLevel)
-				})
-			})
-
-			suite.Run("CustomLevel", func() {
-				suite.Run(testCase.description, func() {
-					var (
-						logger, output = suite.newTestLogger(zapcore.DebugLevel)
-						listener       = suite.newListener(WithLogger(logger), WithLevel(zap.DebugLevel))
-					)
-
-					suite.Empty(output.Bytes())
-					listener.OnRefreshEvent(testCase.event)
-					suite.assertRefreshEntry(output, testCase.event, zapcore.DebugLevel)
-				})
-			})
-		})
-	}
-}
-
-func (suite *ListenerSuite) testOnRefreshEventError() {
-	var (
-		expectedError  = errors.New("expected")
-		logger, output = suite.newTestLogger(zapcore.ErrorLevel)
-		listener       = suite.newListener(WithLogger(logger))
-
-		event = clortho.RefreshEvent{
-			URI:  testURL,
-			Keys: suite.keys,
-			Err:  expectedError,
-		}
-	)
-
-	suite.Empty(output.Bytes())
-	listener.OnRefreshEvent(event)
-	suite.assertRefreshEntry(output, event, zapcore.ErrorLevel)
-}
-
-func (suite *ListenerSuite) testOnRefreshEventDisabled() {
-	var (
-		logger, output = suite.newTestLogger(zapcore.PanicLevel)
-		listener       = suite.newListener(WithLogger(logger))
-	)
-
-	suite.Empty(output.Bytes())
-	listener.OnRefreshEvent(clortho.RefreshEvent{
-		URI: testURL,
+	l.OnRefreshEvent(clortho.RefreshEvent{
+		URI:           "https://keys.example.com/jwks",
+		KeyIDs:        []string{"a", "b", "c"},
+		NewKeyIDs:     []string{"c"},
+		DeletedKeyIDs: []string{"z"},
 	})
 
-	suite.Empty(output.Bytes())
+	require.Equal(t, 1, logs.Len())
+	entry := logs.All()[0]
+	assert.Equal(t, zapcore.InfoLevel, entry.Level)
+	assert.Equal(t, "key refresh", entry.Message)
+	f := fields(entry)
+	assert.Equal(t, "https://keys.example.com/jwks", f["uri"])
+	assert.Equal(t, []any{"a", "b", "c"}, f["keyIDs"])
+	assert.Equal(t, []any{"c"}, f["new"])
+	assert.Equal(t, []any{"z"}, f["deleted"])
+	assert.Nil(t, f["error"])
 }
 
-func (suite *ListenerSuite) TestDefault() {
-	listener, err := NewListener()
-	suite.Require().NoError(err)
-	suite.NotNil(listener.logger)
+func TestOnRefreshEventCustomLevel(t *testing.T) {
+	logger, logs := observed(zapcore.DebugLevel)
+	l, err := NewListener(WithLogger(logger), WithLevel(zapcore.DebugLevel))
+	require.NoError(t, err)
+
+	l.OnRefreshEvent(clortho.RefreshEvent{URI: "https://keys.example.com/jwks"})
+
+	require.Equal(t, 1, logs.Len())
+	assert.Equal(t, zapcore.DebugLevel, logs.All()[0].Level)
 }
 
-func (suite *ListenerSuite) TestNewListenerError() {
-	var (
-		expectedError = errors.New("expected")
-		listener, err = NewListener(errorListenerOption{expectedError: expectedError})
-	)
+func TestOnRefreshEventError(t *testing.T) {
+	logger, logs := observed(zapcore.ErrorLevel)
+	l, err := NewListener(WithLogger(logger), WithLevel(zapcore.DebugLevel))
+	require.NoError(t, err)
 
-	suite.Nil(listener)
-	suite.ErrorIs(err, expectedError)
-}
-
-func (suite *ListenerSuite) TestOnRefreshEvent() {
-	suite.Run("NoError", suite.testOnRefreshEventNoError)
-	suite.Run("Error", suite.testOnRefreshEventError)
-	suite.Run("Disabled", suite.testOnRefreshEventDisabled)
-}
-
-func (suite *ListenerSuite) testOnResolveEventNoError() {
-	var (
-		logger, output = suite.newTestLogger(zapcore.InfoLevel)
-		listener       = suite.newListener(WithLogger(logger))
-
-		event = clortho.ResolveEvent{
-			URI:   testFooURL,
-			KeyID: "foo",
-			// NOTE: we don't use the Key field for logging
-		}
-	)
-
-	suite.Empty(output.Bytes())
-	listener.OnResolveEvent(event)
-	suite.assertResolveEntry(output, event, zapcore.InfoLevel)
-}
-
-func (suite *ListenerSuite) testOnResolveEventError() {
-	var (
-		expectedError = errors.New("expected")
-
-		logger, output = suite.newTestLogger(zapcore.ErrorLevel)
-		listener       = suite.newListener(WithLogger(logger))
-
-		event = clortho.ResolveEvent{
-			URI:   testFooURL,
-			KeyID: "foo",
-			// NOTE: we don't use the Key field for logging
-			Err: expectedError,
-		}
-	)
-
-	suite.Empty(output.Bytes())
-	listener.OnResolveEvent(event)
-	suite.assertResolveEntry(output, event, zapcore.ErrorLevel)
-}
-
-func (suite *ListenerSuite) testOnResolveEventDisabled() {
-	var (
-		logger, output = suite.newTestLogger(zapcore.PanicLevel)
-		listener       = suite.newListener(WithLogger(logger))
-	)
-
-	suite.Empty(output.Bytes())
-	listener.OnResolveEvent(clortho.ResolveEvent{
-		URI: testURL,
+	expected := errors.New("expected")
+	l.OnRefreshEvent(clortho.RefreshEvent{
+		URI:    "https://keys.example.com/jwks",
+		Err:    expected,
+		KeyIDs: []string{"a"},
 	})
 
-	suite.Empty(output.Bytes())
+	require.Equal(t, 1, logs.Len())
+	entry := logs.All()[0]
+	assert.Equal(t, zapcore.ErrorLevel, entry.Level, "a failure is always an error entry")
+	f := fields(entry)
+	assert.Equal(t, expected.Error(), f["error"])
+	assert.Equal(t, []any{"a"}, f["keyIDs"])
 }
 
-func (suite *ListenerSuite) TestOnResolveEvent() {
-	suite.Run("NoError", suite.testOnResolveEventNoError)
-	suite.Run("Error", suite.testOnResolveEventError)
-	suite.Run("Disabled", suite.testOnResolveEventDisabled)
-}
+func TestOnRefreshEventDisabled(t *testing.T) {
+	logger, logs := observed(zapcore.PanicLevel)
+	l, err := NewListener(WithLogger(logger))
+	require.NoError(t, err)
 
-func TestListener(t *testing.T) {
-	suite.Run(t, new(ListenerSuite))
+	l.OnRefreshEvent(clortho.RefreshEvent{URI: "https://keys.example.com/jwks"})
+	assert.Zero(t, logs.Len())
 }

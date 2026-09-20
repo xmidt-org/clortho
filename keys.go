@@ -3,48 +3,63 @@
 
 package clortho
 
-// Keys is a sortable slice of Key instances.  Sorting is done
-// by keyID, ascending.  Keys with no keyID are sorted after those
-// that have a keyID.
-type Keys []Key
+import (
+	"errors"
+	"fmt"
 
-// AppendKeyIDs appends the key Id of each key to the supplied slice,
-// then returns the result.
-func (ks Keys) AppendKeyIDs(v []string) []string {
-	if cap(v) < len(v)+len(ks) {
-		// reduce the number of allocations
-		v = append(
-			make([]string, 0, len(v)+len(ks)),
-			v...,
-		)
+	"github.com/lestrrat-go/jwx/v4/jwa"
+	"github.com/lestrrat-go/jwx/v4/jwk"
+)
+
+// parseKeys parses a JWK set or a single JWK into the keys the ring will hold.
+// Every key must carry a kid and must not be symmetric, and no kid may appear
+// twice.  Each key is reduced to its public form, so that a private key which
+// found its way into a published set never sits on the ring.  Any bad key
+// fails the whole parse: a source that serves a misconfigured set is treated
+// as a failed refresh rather than partially trusted.
+func parseKeys(data []byte) ([]jwk.Key, error) {
+	set, err := jwk.Parse(data)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, k := range ks {
-		v = append(v, k.KeyID())
+	var (
+		keys = make([]jwk.Key, 0, set.Len())
+		seen = make(map[string]bool, set.Len())
+		errs []error
+	)
+
+	for i := range set.Len() {
+		k, _ := set.Key(i)
+		kid, ok := k.KeyID()
+		if !ok || kid == "" {
+			errs = append(errs, fmt.Errorf("%w: key %d in the set", ErrMissingKeyID, i))
+			continue
+		}
+
+		if k.KeyType() == jwa.OctetSeq() {
+			errs = append(errs, fmt.Errorf("%w: %q", ErrSymmetricKey, kid))
+			continue
+		}
+
+		if seen[kid] {
+			errs = append(errs, fmt.Errorf("%w: %q appears more than once in the set", ErrDuplicateKeyID, kid))
+			continue
+		}
+
+		pub, err := k.PublicKey()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("key %q: %w", kid, err))
+			continue
+		}
+
+		seen[kid] = true
+		keys = append(keys, pub)
 	}
 
-	return v
-}
-
-// Len returns the count of Key instances in this collection.
-func (ks Keys) Len() int {
-	return len(ks)
-}
-
-// Less tests if the Key at i is less than the one at j.
-func (ks Keys) Less(i, j int) bool {
-	left, right := ks[i].KeyID(), ks[j].KeyID()
-	switch {
-	case len(left) == 0:
-		return false
-	case len(right) == 0:
-		return true
-	default:
-		return left < right
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
 	}
-}
 
-// Swap switches the positions of the Keys at i and j.
-func (ks Keys) Swap(i, j int) {
-	ks[i], ks[j] = ks[j], ks[i]
+	return keys, nil
 }

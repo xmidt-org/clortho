@@ -17,262 +17,95 @@ import (
 // uses for its components.
 const Module = "clortho"
 
-// newKeyRing creates the key ring component.  This is in a separate function
-// to make debugging easier, as it will show up in fx's logs.
-func newKeyRing() clortho.KeyRing {
-	return clortho.NewKeyRing()
-}
-
-// newFetcher takes the set of injected components and produces a clortho.Fetcher.
-func newFetcher(opts ...clortho.FetcherOption) clortho.Fetcher {
-
-	return clortho.NewFetcher(opts...)
-}
-
-// ZapIn holds the set of dependencies for creating a *clorthozap.Listener.
-type ZapIn struct {
+// ProviderIn enumerates the components involved in creating a
+// *clortho.Provider.
+type ProviderIn struct {
 	fx.In
 
+	// Config is required.  The application unmarshals its own settings and
+	// maps them onto this, which is also where it hands each source the
+	// *http.Client it wants.
+	Config clortho.Config
+
+	// Logger, when present, receives a log entry for every refresh through a
+	// clorthozap.Listener.
 	Logger *zap.Logger `optional:"true"`
-}
 
-func decorateLogger(in ZapIn) (l *zap.Logger) {
-	if in.Logger != nil {
-		l = in.Logger.Named(Module)
-	}
-
-	return
-}
-
-func newZapListener(in ZapIn) (l *clorthozap.Listener, err error) {
-	if in.Logger != nil {
-		l, err = clorthozap.NewListener(
-			clorthozap.WithLogger(in.Logger),
-		)
-	}
-
-	return
-}
-
-// MetricsIn holds the set of dependencies for creating a *clorthometrics.Listener.
-type MetricsIn struct {
-	fx.In
-
+	// Factory, when present, receives refresh metrics through a
+	// clorthometrics.Listener.
 	Factory *touchstone.Factory `optional:"true"`
-}
-
-func newMetricsListener(in MetricsIn) (l *clorthometrics.Listener, err error) {
-	if in.Factory != nil {
-		l, err = clorthometrics.NewListener(
-			clorthometrics.WithFactory(in.Factory),
-		)
-	}
-
-	return
-}
-
-// RefresherIn enumerates the set of components involved in the creation
-// of a clortho.Refresher.
-type RefresherIn struct {
-	fx.In
-
-	// KeyRing is the key ring to refresh.  This will be either supplied from the
-	// enclosing application or internally created within this module.
-	KeyRing clortho.KeyRing
-
-	Fetcher         clortho.Fetcher
-	Config          clortho.Config           `optional:"true"`
-	ZapListener     *clorthozap.Listener     `optional:"true"`
-	MetricsListener *clorthometrics.Listener `optional:"true"`
 
 	Lifecycle fx.Lifecycle
 }
 
-func newRefresher(in RefresherIn) (r clortho.Refresher, err error) {
-	r, err = clortho.NewRefresher(
-		clortho.WithFetcher(in.Fetcher),
-		clortho.WithConfig(in.Config),
-	)
-
-	if err == nil {
-		if in.ZapListener != nil {
-			r.AddListener(in.ZapListener)
-		}
-
-		if in.MetricsListener != nil {
-			r.AddListener(in.MetricsListener)
-		}
-
-		r.AddListener(in.KeyRing)
-		in.Lifecycle.Append(fx.Hook{
-			OnStart: r.Start,
-			OnStop:  r.Stop,
-		})
+// newProvider creates the Provider, attaches the optional listeners, and
+// binds Start and Stop to the application lifecycle.
+func newProvider(in ProviderIn) (*clortho.Provider, error) {
+	p, err := clortho.New(in.Config)
+	if err != nil {
+		return nil, err
 	}
 
-	return
-}
-
-// ResolverIn enumerates the set of components involved in the creation
-// of a clortho.Resolver.
-type ResolverIn struct {
-	fx.In
-
-	// KeyRing is the ring the resolver uses as a cache.  This will be either supplied
-	// from the enclosing application or internally created within this module.
-	KeyRing clortho.KeyRing
-
-	Fetcher         clortho.Fetcher
-	Config          clortho.Config           `optional:"true"`
-	ZapListener     *clorthozap.Listener     `optional:"true"`
-	MetricsListener *clorthometrics.Listener `optional:"true"`
-
-	// Options are applied after the fetcher, ring, and Config.  An application
-	// supplies them as a []clortho.ResolverOption value, the same way it supplies
-	// []clortho.FetcherOption and []clortho.KeyProviderOption.  This is how an
-	// fx-wired application replaces the key ID validator, e.g. with
-	// clortho.WithKeyIDValidator for a deployment whose key IDs are URLs.
-	Options []clortho.ResolverOption `optional:"true"`
-}
-
-func newResolver(in ResolverIn) (r clortho.Resolver, err error) {
-	opts := make([]clortho.ResolverOption, 0, 3+len(in.Options))
-	opts = append(opts,
-		clortho.WithFetcher(in.Fetcher),
-		clortho.WithKeyRing(in.KeyRing),
-		clortho.WithConfig(in.Config),
-	)
-	opts = append(opts, in.Options...)
-
-	r, err = clortho.NewResolver(opts...)
-
-	if err == nil {
-		if in.ZapListener != nil {
-			r.AddListener(in.ZapListener)
+	if in.Logger != nil {
+		l, err := clorthozap.NewListener(clorthozap.WithLogger(in.Logger.Named(Module)))
+		if err != nil {
+			return nil, err
 		}
 
-		if in.MetricsListener != nil {
-			r.AddListener(in.MetricsListener)
+		p.AddListener(l)
+	}
+
+	if in.Factory != nil {
+		l, err := clorthometrics.NewListener(clorthometrics.WithFactory(in.Factory))
+		if err != nil {
+			return nil, err
 		}
+
+		p.AddListener(l)
 	}
 
-	return
+	in.Lifecycle.Append(fx.Hook{
+		OnStart: p.Start,
+		OnStop:  p.Stop,
+	})
+
+	return p, nil
 }
 
-// KeyProviderIn enumerates the set of components involved in the creation
-// of a jws.KeyProvider.
-type KeyProviderIn struct {
-	fx.In
-
-	// KeyRing is the ring the provider verifies against.  This is the same ring
-	// the Refresher fills.
-	KeyRing clortho.KeyRing
-
-	// Config, when present and non-empty, is checked for at least one refresh
-	// source.  The provider does not otherwise read it.
-	Config clortho.Config `optional:"true"`
-
-	// Options are applied after the ring and the Config.  An application supplies
-	// them as a []clortho.KeyProviderOption value, the same way it supplies
-	// []clortho.FetcherOption for the Fetcher.  This is how an fx-wired application
-	// opts out of the provider's defaults, e.g. clortho.WithAllowSymmetricKeys for
-	// a deployment that shares a secret through a local file.
-	Options []clortho.KeyProviderOption `optional:"true"`
+// newKeyProvider exposes the Provider under the interface a bascule token
+// parser injects.
+func newKeyProvider(p *clortho.Provider) jws.KeyProvider {
+	return p
 }
 
-// isZeroConfig reports whether cfg has nothing set at all.  An application with
-// no Config feeds the ring itself, so there is nothing to validate.
-func isZeroConfig(cfg clortho.Config) bool {
-	return len(cfg.Refresh.Sources) == 0 && cfg.Resolve == (clortho.ResolveConfig{})
-}
-
-// newKeyProvider creates the jws.KeyProvider component.  When a Config was
-// supplied, it is passed along so that NewKeyProvider rejects a configuration
-// with no refresh sources at startup, rather than leaving a ring that never fills.
-func newKeyProvider(in KeyProviderIn) (jws.KeyProvider, error) {
-	opts := []clortho.KeyProviderOption{
-		clortho.WithKeyRing(in.KeyRing),
-	}
-
-	if !isZeroConfig(in.Config) {
-		opts = append(opts, clortho.WithConfig(in.Config))
-	}
-
-	opts = append(opts, in.Options...)
-
-	return clortho.NewKeyProvider(opts...)
-}
-
-// newKeyAccessor just returns the key ring as is for now.
-// Future versions may do some kind of decoration.
-func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
-	return kr
-}
-
-// Provide bootstraps the clortho module.
+// Provide bootstraps the clortho module.  The application must supply a
+// clortho.Config; an optional *zap.Logger and *touchstone.Factory enable
+// logging and metrics for refreshes.
 //
-// If a clortho.KeyRing is present in the enclosing application, it will be used as the
-// cache for the resolver and refresher.  Otherwise, an internal key ring is created and used.
+// This module provides:
 //
-// This module provides the following components:
-//
-//   - clortho.KeyRing
-//     Available as a component itself, this is also used as the cache for the resolver and
-//     is refreshed using the injected clortho.Config configuration.
-//
-//   - clortho.Fetcher
-//     An optional clortho.Parser and clortho.Loader may be supplied to tailor this component.
-//     If no parser or loader are supplied, the package defaults are used.
-//
-//   - clorthozap.Listener
-//     This will be non-nil only if a *zap.Logger is supplied.  If non-nil, it will automatically
-//     listen for refresh and resolve events.
-//
-//   - clorthometrics.Listener
-//     This will be non-nil only if a *touchstone.Factory is supplied.  If non-nil, it will
-//
-//   - clortho.Refresher
-//     The refresher will be bound to the application lifecycle.
-//
-//   - clortho.Resolver
-//     A []clortho.ResolverOption value in the application, if any, is applied last, so
-//     that the default key ID validation can be replaced where a deployment needs it.
-//
-//   - clortho.KeyAccessor
-//     This is the same component as the key ring, but may be decorated in future versions.
-//     Clients that only need read access to the key ring should use this component.
+//   - *clortho.Provider
+//     Bound to the application lifecycle, so its sources are refreshed from
+//     Start until Stop.  Inject it for Status and KeyIDs, e.g. from a health
+//     endpoint.
 //
 //   - jws.KeyProvider
-//     Verifies JWS signatures against the key ring.  This is what a bascule token parser
-//     needs.  If a non-empty clortho.Config is supplied, it must have at least one refresh
-//     source, since the ring is filled only by the Refresher; a Config with only a resolve
-//     template fails at startup with clortho.ErrNoRefreshSources.  A
-//     []clortho.KeyProviderOption value in the application, if any, is applied last, so
-//     that the provider's defaults (rejecting symmetric keys and keys not marked for
-//     signature use) can be relaxed where a deployment needs it.  Like every fx
-//     constructor, this one runs only if something injects the provider.  An application
-//     that provides its own jws.KeyProvider will get a duplicate-provide error from fx;
-//     use fx.Decorate or a named value to combine the two.
+//     The same Provider, under the interface a basculejwt token parser takes
+//     via jwt.WithKeyProvider.  An application that provides its own
+//     jws.KeyProvider will get a duplicate-provide error from fx; use
+//     fx.Decorate or a named value to combine the two.
+//
+// The Provider is constructed eagerly, so a Config problem fails the
+// application at startup rather than when a token first arrives.
 func Provide() fx.Option {
 	return fx.Module(
 		Module,
-		fx.Decorate(
-			decorateLogger,
-		),
 		fx.Provide(
-			newKeyRing,
-			newFetcher,
-			newZapListener,
-			newMetricsListener,
-			newRefresher,
-			newResolver,
-			newKeyAccessor,
+			newProvider,
 			newKeyProvider,
 		),
 		fx.Invoke(
-			// eagerly load the refresher so that it's background
-			// goroutine(s) start
-			func(clortho.Refresher) {},
+			func(*clortho.Provider) {},
 		),
 	)
 }

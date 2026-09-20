@@ -13,89 +13,57 @@ const (
 	MetricPrefix = "keys_"
 
 	// RefreshTotalName is the name of the counter for all refresh attempts,
-	// both successful and unsuccessful.
+	// both successful and unsuccessful, labeled by source.
 	RefreshTotalName = MetricPrefix + "refresh_total"
 
 	// RefreshTotalHelp is the help text for the refresh total metric.
 	RefreshTotalHelp = "the total number of attempts to refresh keys, both successful and unsuccessful"
 
-	// RefreshKeysName is the name of the gauge for the number of keys from a particular
-	// source URI.
+	// RefreshKeysName is the name of the gauge for the number of keys a
+	// source currently supplies, labeled by source.
 	RefreshKeysName = MetricPrefix + "refresh_keys"
 
 	// RefreshKeysHelp is the help text for the refresh keys metric.
-	RefreshKeysHelp = "the number of keys for a particular source URI"
+	RefreshKeysHelp = "the number of keys currently supplied by a source"
 
 	// RefreshErrorTotalName is the name of the counter for key refreshes that
-	// resulted in an error.
+	// resulted in an error, labeled by source.
 	RefreshErrorTotalName = MetricPrefix + "refresh_error_total"
 
 	// RefreshErrorTotalHelp is the help text for the refresh error total metric.
 	RefreshErrorTotalHelp = "the total number of failed attempts to refresh keys"
 
-	// ResolveTotalName is the name of the counter for all resolve attempts,
-	// both successful and unsuccessful.  Individual keys, rather than key sets,
-	// are resolved.  In contrast, the refresh metrics track key set refreshes.
-	ResolveTotalName = MetricPrefix + "resolve_total"
-
-	// ResolveTotalHelp is the help text for the resolve total metric.
-	ResolveTotalHelp = "the total attempts to resolve individual keys by key id, both successful and unsuccessful"
-
-	// ResolveErrorTotalName is the name of the counter for failed resolve attempts
-	// for individual keys.
-	ResolveErrorTotalName = MetricPrefix + "resolve_error_total"
-
-	// ResolveErrorTotalHelp is the help text for the resolve error metric.
-	ResolveErrorTotalHelp = "the total failed attempts to resolve individual keys"
-
-	// SourceLabel is the metric label indicating the URI source of the key(s).
+	// SourceLabel is the metric label carrying the source URI, with any
+	// password redacted.
 	SourceLabel = "source"
-
-	// KeyIDLabel is the metric label indicating the key ID that was resolved.
-	KeyIDLabel = "keyID"
 )
 
-func newRefreshTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
-	return f.NewCounter(
+func newRefreshTotal(f *touchstone.Factory) (*prometheus.CounterVec, error) {
+	return f.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: RefreshTotalName,
 			Help: RefreshTotalHelp,
 		},
+		SourceLabel,
 	)
 }
 
-func newRefreshKeys(f *touchstone.Factory) (m prometheus.Gauge, err error) {
-	return f.NewGauge(
+func newRefreshKeys(f *touchstone.Factory) (*prometheus.GaugeVec, error) {
+	return f.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: RefreshKeysName,
 			Help: RefreshKeysHelp,
 		},
+		SourceLabel,
 	)
 }
 
-func newRefreshErrorTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
-	return f.NewCounter(
+func newRefreshErrorTotal(f *touchstone.Factory) (*prometheus.CounterVec, error) {
+	return f.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: RefreshErrorTotalName,
 			Help: RefreshErrorTotalHelp,
 		},
-	)
-}
-
-func newResolveTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
-	return f.NewCounter(
-		prometheus.CounterOpts{
-			Name: ResolveTotalName,
-			Help: ResolveTotalHelp,
-		},
-	)
-}
-
-func newResolveErrorTotal(f *touchstone.Factory) (m prometheus.Counter, err error) {
-	return f.NewCounter(
-		prometheus.CounterOpts{
-			Name: ResolveErrorTotalName,
-			Help: ResolveErrorTotalHelp,
-		},
+		SourceLabel,
 	)
 }
