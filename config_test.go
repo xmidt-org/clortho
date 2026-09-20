@@ -45,7 +45,7 @@ func TestNewReportsEveryProblemAtOnce(t *testing.T) {
 		{},
 	}})
 	assert.ErrorIs(t, err, ErrUnsupportedScheme)
-	assert.ErrorContains(t, err, "URI is required")
+	assert.ErrorContains(t, err, "source 1: a URI is required")
 }
 
 func TestNewRedactsACredentialedURIInErrors(t *testing.T) {
@@ -138,8 +138,11 @@ func TestNewDoesNotShareTheCallersSlice(t *testing.T) {
 }
 
 func TestNewRejectsAnUnparseableURI(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "http://[::1"}}})
+	uri := "http://user:" + "hunter2" + "@[::1"
+	p, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
 	assert.ErrorIs(t, err, ErrUnsupportedScheme)
+	assert.ErrorContains(t, err, "source 0")
+	assert.NotContains(t, err.Error(), "hunter2")
 	assert.Nil(t, p)
 }
 
@@ -149,8 +152,7 @@ func TestRedactURIWithoutAPassword(t *testing.T) {
 }
 
 func TestRedactURIThatDoesNotParse(t *testing.T) {
-	uri := "https://user:" + "hunter2" + "@keys.example.com/{bad}/[::1"
-	redacted := redactURI(uri)
-	assert.NotContains(t, redacted, "hunter2")
-	assert.Contains(t, redacted, "user:xxxxx@")
+	// url.Parse is strict about the host, not the path
+	uri := "https://user:" + "hunter2" + "@[::1"
+	assert.Equal(t, "<unparseable URI>", redactURI(uri))
 }

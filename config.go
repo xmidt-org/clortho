@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"time"
 )
 
@@ -64,18 +63,18 @@ type RefreshSource struct {
 
 	// RefreshInterval is the time between refreshes when the server gives no
 	// hint.  An http source's Cache-Control max-age, when present, is used
-	// instead.  Zero: DefaultRefreshInterval.
+	// instead.  If zero, DefaultRefreshInterval is used.
 	RefreshInterval time.Duration
 
 	// MinRefreshInterval is the shortest time between refreshes, whatever the
-	// server says and whatever an unknown key ID asks for.  Zero:
-	// DefaultMinRefreshInterval.
+	// server says and whatever an unknown key ID asks for.  If zero,
+	// DefaultMinRefreshInterval is used.
 	MinRefreshInterval time.Duration
 
 	// MaxRefreshInterval is the longest time between refreshes, whatever the
 	// server says.  A refresh happens at least this often even when the content
 	// never changes, so it bounds how long a key the issuer has removed can
-	// still verify.  Zero: DefaultMaxRefreshInterval.  A value below the
+	// still verify.  If zero, DefaultMaxRefreshInterval is used.  A value below the
 	// effective MinRefreshInterval is raised to it.
 	MaxRefreshInterval time.Duration
 
@@ -93,14 +92,14 @@ type RefreshSource struct {
 	JitterPercentage float64
 
 	// Client makes the requests for an http or https URI.  It owns timeout,
-	// redirects, TLS, proxies, and any authorization its transport adds.  Nil: a
-	// client with DefaultHTTPTimeout that does not follow redirects.  Ignored
-	// for a file source.
+	// redirects, TLS, proxies, and any authorization its transport adds.  If
+	// nil, a default client with DefaultHTTPTimeout and no redirects is used
+	// that does not follow redirects.  Ignored for a file source.
 	Client *http.Client
 
 	// MaxResponseBytes caps the body read from an http or https URI.  A larger
-	// body fails the refresh with ErrResponseTooLarge.  Zero:
-	// DefaultMaxResponseBytes.
+	// body fails the refresh with ErrResponseTooLarge.  If less than 1,
+	// DefaultMaxResponseBytes is used.  Ignored for a file source.
 	MaxResponseBytes int64
 }
 
@@ -131,24 +130,25 @@ type VerifyConfig struct {
 	IgnoreKeyAlgorithm bool
 }
 
-// userinfoPassword matches the password of a URI's userinfo in text, for
-// strings that url.Parse rejects.
-var userinfoPassword = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9+.-]*://[^/?#@]*:)[^/?#@]*@`)
-
 // redactURI returns uri with any userinfo password replaced, as
 // url.URL.Redacted does.  Errors, events, and status carry redacted URIs so
 // that a source configured with credentials in its URI does not put them in
 // logs.
+//
+// Every URI that reaches this function has already been parsed by New, so
+// the fallback for one that does not parse is never expected to run; it
+// returns a placeholder rather than risk echoing a password.
 func redactURI(uri string) string {
-	if u, err := url.Parse(uri); err == nil {
-		if _, hasPassword := u.User.Password(); !hasPassword {
-			return uri
-		}
-
-		return u.Redacted()
+	u, err := url.Parse(uri)
+	if err != nil {
+		return "<unparseable URI>"
 	}
 
-	return userinfoPassword.ReplaceAllString(uri, "${1}xxxxx@")
+	if _, hasPassword := u.User.Password(); !hasPassword {
+		return uri
+	}
+
+	return u.Redacted()
 }
 
 // isHTTP reports whether a source URI is loaded over HTTP rather than from
@@ -173,15 +173,18 @@ func newDefaultHTTPClient() *http.Client {
 	}
 }
 
-// validate checks the source's URI.
-func (rs RefreshSource) validate() error {
+// validate checks the source's URI.  index identifies the source in errors
+// where the URI itself cannot be shown.
+func (rs RefreshSource) validate(index int) error {
 	if rs.URI == "" {
-		return errors.New("a URI is required for each source")
+		return fmt.Errorf("source %d: a URI is required", index)
 	}
 
+	// an unparseable URI is not quoted: it might hold a password that cannot
+	// be redacted without parsing it
 	u, err := url.Parse(rs.URI)
 	if err != nil {
-		return fmt.Errorf("%w: %q", ErrUnsupportedScheme, redactURI(rs.URI))
+		return fmt.Errorf("%w: source %d could not be parsed as a URI", ErrUnsupportedScheme, index)
 	}
 
 	switch u.Scheme {
@@ -240,8 +243,8 @@ func normalizeSources(in []RefreshSource) ([]RefreshSource, error) {
 		out  = make([]RefreshSource, 0, len(in))
 	)
 
-	for _, rs := range in {
-		errs = append(errs, rs.validate())
+	for i, rs := range in {
+		errs = append(errs, rs.validate(i))
 
 		if seen[rs.URI] {
 			errs = append(errs, fmt.Errorf("duplicate source URI: %q", redactURI(rs.URI)))
