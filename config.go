@@ -93,6 +93,9 @@ func validateRefreshSources(in ...RefreshSource) (err error) {
 type ResolveConfig struct {
 	// Template is a URI template used to fetch keys.  This template may
 	// use a single parameter named keyID, e.g. http://keys.com/{keyID}.
+	//
+	// If empty, a Resolver built from this configuration serves only keys
+	// already on its ring, and reports ErrNoTemplate for any other key ID.
 	Template string `json:"template" yaml:"template"`
 
 	// Timeout refers to the maximum time to wait for a refresh operation.

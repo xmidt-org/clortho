@@ -141,9 +141,14 @@ func WithKeyIDExpander(e Expander) ResolverOption {
 }
 
 // WithKeyIDTemplate establishes the URI template used for resolving
-// individual keys.
+// individual keys.  An empty template yields a ring-only Resolver whose
+// misses report ErrNoTemplate; see NewResolver.
 func WithKeyIDTemplate(t string) ResolverOption {
 	return resolverOptionFunc(func(r *resolver) error {
+		if len(t) == 0 {
+			return WithKeyIDExpander(noTemplateExpander{}).applyToResolver(r)
+		}
+
 		e, err := NewExpander(t)
 		if err == nil {
 			err = WithKeyIDExpander(e).applyToResolver(r)

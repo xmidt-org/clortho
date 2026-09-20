@@ -730,6 +730,51 @@ func (suite *ResolverSuite) TestWithConfig() {
 	f.AssertExpectations(suite.T())
 }
 
+// TestEmptyKeyIDTemplate checks that an empty template yields a ring-only
+// Resolver.  Construction succeeds, keys already on the ring resolve, and a ring
+// miss reports ErrNoTemplate rather than trying to fetch from an empty location.
+func (suite *ResolverSuite) TestEmptyKeyIDTemplate() {
+	var (
+		f = new(mockFetcher) // expects no calls
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyRing(NewKeyRing(suite.testKey)),
+			WithKeyIDTemplate(""),
+		)
+	)
+
+	key, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Equal(suite.testKey, key)
+
+	key, err = r.Resolve(context.Background(), "missing")
+	suite.Nil(key)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrNoTemplate)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestWithConfigNoTemplate is TestEmptyKeyIDTemplate through Config, which is
+// how clorthofx builds a Resolver for an application that configured refresh
+// sources but no resolve template.
+func (suite *ResolverSuite) TestWithConfigNoTemplate() {
+	var (
+		f = new(mockFetcher) // expects no calls
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithConfig(Config{}),
+		)
+	)
+
+	key, err := r.Resolve(context.Background(), "testKey")
+	suite.Nil(key)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrNoTemplate)
+
+	f.AssertExpectations(suite.T())
+}
+
 func TestResolver(t *testing.T) {
 	suite.Run(t, new(ResolverSuite))
 }
