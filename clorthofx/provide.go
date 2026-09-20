@@ -4,6 +4,7 @@
 package clorthofx
 
 import (
+	"github.com/lestrrat-go/jwx/v4/jws"
 	"github.com/xmidt-org/clortho"
 	"github.com/xmidt-org/clortho/clorthometrics"
 	"github.com/xmidt-org/clortho/clorthozap"
@@ -136,6 +137,30 @@ func newResolver(in ResolverIn) (r clortho.Resolver, err error) {
 	return
 }
 
+// keyProviderNoticeIn lets the module detect a jws.KeyProvider supplied by the
+// enclosing application without providing one itself.
+type keyProviderNoticeIn struct {
+	fx.In
+
+	Logger      *zap.Logger     `optional:"true"`
+	KeyProvider jws.KeyProvider `optional:"true"`
+}
+
+// warnOnApplicationKeyProvider logs a warning when the enclosing application
+// provides its own jws.KeyProvider.  Starting with v0.4.0 this module provides
+// one, and fx refuses to start an application with two unnamed providers of the
+// same type.  Both dependencies are optional, so this never affects the graph
+// and never fails startup.
+func warnOnApplicationKeyProvider(in keyProviderNoticeIn) {
+	if in.KeyProvider == nil || in.Logger == nil {
+		return
+	}
+
+	in.Logger.Warn(
+		"this application provides its own jws.KeyProvider; starting with clortho v0.4.0, clorthofx provides one too, and fx will refuse to start with both. Before upgrading, drop the application's provider in favor of the module's, or give it a name.",
+	)
+}
+
 // newKeyAccessor just returns the key ring as is for now.
 // Future versions may do some kind of decoration.
 func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
@@ -172,6 +197,12 @@ func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
 //   - clortho.KeyAccessor
 //     This is the same component as the key ring, but may be decorated in future versions.
 //     Clients that only need read access to the key ring should use this component.
+//
+// Starting with v0.4.0, this module will also provide jws.KeyProvider, built from the
+// key ring.  An application that provides its own jws.KeyProvider will then fail to
+// start with a duplicate-provide error.  This version detects that situation and logs a
+// warning at startup, if a *zap.Logger is available, so that such applications can drop
+// their own provider or name it before upgrading.
 func Provide() fx.Option {
 	return fx.Module(
 		Module,
@@ -191,6 +222,7 @@ func Provide() fx.Option {
 			// eagerly load the refresher so that it's background
 			// goroutine(s) start
 			func(clortho.Refresher) {},
+			warnOnApplicationKeyProvider,
 		),
 	)
 }
