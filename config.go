@@ -18,6 +18,11 @@ const (
 	// regardless of how the base interval was determined.
 	DefaultRefreshMinInterval = time.Minute * 10
 
+	// DefaultRefreshMaxInterval is the hard maximum for the interval between key refreshes
+	// regardless of how the interval was determined.  In particular, a source cannot push
+	// the interval past this by serving a large Cache-Control max-age.
+	DefaultRefreshMaxInterval = time.Hour * 24 * 7
+
 	// DefaultRefreshJitter is the default randomization factor for key refreshes.
 	DefaultRefreshJitter = 0.1
 )
@@ -45,9 +50,22 @@ type RefreshSource struct {
 	// If this value is not positive, DefaultRefreshMinInterval is used.
 	MinInterval time.Duration `json:"minInterval" yaml:"minInterval"`
 
+	// MaxInterval specifies the absolute maximum time between key refreshes from this source.
+	// Regardless of HTTP headers, the Interval field, etc, key refreshes will occur at least
+	// this often.  This bounds how long a source can make the refresher wait by serving a
+	// large max-age, so that rotated or revoked keys are not trusted indefinitely.
+	//
+	// If this value is not positive, the larger of DefaultRefreshMaxInterval and the
+	// effective Interval is used, so a deliberately long Interval is never cut short by
+	// the default.  If it is less than the effective MinInterval, MinInterval is used,
+	// since that is the hard floor.
+	MaxInterval time.Duration `json:"maxInterval" yaml:"maxInterval"`
+
 	// Jitter is the randomization factor applied to the interval between refreshes.  No matter how
 	// the interval is determined (e.g. Cache-Control, Interval field, etc), a random value between
 	// [1-Jitter,1+Jitter]*interval is used as the actual time before the next attempted refresh.
+	// That window is then clipped to [MinInterval, MaxInterval]; an explicit MaxInterval below
+	// the top of the window therefore narrows it.
 	//
 	// Valid values are between 0.0 and 1.0, exclusive.  If this value is outside that range,
 	// including being unset, DefaultRefreshJitter is used instead.
