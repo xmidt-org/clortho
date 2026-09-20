@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -323,6 +324,31 @@ func (suite *ProvideSuite) TestKeyProviderOptions() {
 	payload, err := jws.Verify(suite.newHMACJWS(), jws.WithKeyProvider(kp))
 	suite.Require().NoError(err)
 	suite.JSONEq(`{"sub":"test"}`, string(payload))
+}
+
+// TestResolverOptions checks that an application can pass clortho.ResolverOption
+// values to the module's Resolver, the same way it can for the Fetcher and the
+// key provider.  Without this, an fx-wired deployment with key IDs the default
+// validator rejects has no way to supply WithKeyIDValidator.
+func (suite *ProvideSuite) TestResolverOptions() {
+	var (
+		resolver  clortho.Resolver
+		customErr = errors.New("rejected by the application's validator")
+
+		app = suite.newFxTest(
+			Provide(),
+			fx.Supply([]clortho.ResolverOption{
+				clortho.WithKeyIDValidator(func(string) error { return customErr }),
+			}),
+			fx.Populate(&resolver),
+		)
+	)
+
+	app.RequireStart()
+	defer app.RequireStop()
+
+	_, err := resolver.Resolve(context.Background(), "kid-1")
+	suite.ErrorIs(err, customErr)
 }
 
 // TODO: flesh these tests out with gock, possibly using

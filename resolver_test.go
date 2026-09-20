@@ -9,6 +9,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -846,6 +848,147 @@ func (suite *ResolverSuite) TestSingleKeyWithoutKidAdopted() {
 	suite.Require().NoError(err)
 	suite.Equal(k, again)
 
+	f.AssertExpectations(suite.T())
+}
+
+// TestValidateKeyID pins the default rule for what a key ID may contain before
+// it is expanded into a URI.
+func (suite *ResolverSuite) TestValidateKeyID() {
+	for _, valid := range []string{"kid-1", "abc123", "key.2024", "k_1", "k:1", "k@x", "urn:example:key", "KEY=", "a+b"} {
+		suite.NoError(ValidateKeyID(valid), "%q should be valid", valid)
+	}
+
+	for _, invalid := range []string{"", "../secret", "a/b", `a\b`, "a?b", "a#b", "a b", "a\tb", "a\x00b", "a%2Fb", "..", "a\nb"} {
+		err := ValidateKeyID(invalid)
+		suite.Require().Error(err, "%q should be invalid", invalid)
+		suite.ErrorIs(err, ErrInvalidKeyID, "%q", invalid)
+	}
+}
+
+// TestInvalidKeyIDNotFetched checks that a key ID which fails validation is
+// rejected before any URI is built: no fetch, nothing on the ring, and the
+// sentinel in the error chain.
+func (suite *ResolverSuite) TestInvalidKeyIDNotFetched() {
+	var (
+		f    = new(mockFetcher) // expects no calls
+		ring = NewKeyRing()
+		r    = suite.newResolver(
+			WithFetcher(f),
+			WithKeyRing(ring),
+			WithKeyIDTemplate(testKeyIDURL),
+		)
+	)
+
+	for _, keyID := range []string{"", "../secret", "a/b", "a?b", "a#b", "a%2Fb"} {
+		k, err := r.Resolve(context.Background(), keyID)
+		suite.Nil(k, "%q", keyID)
+		suite.Require().Error(err, "%q", keyID)
+		suite.ErrorIs(err, ErrInvalidKeyID, "%q", keyID)
+	}
+
+	suite.Zero(ring.Len())
+	f.AssertExpectations(suite.T())
+}
+
+// TestFileTemplateTraversal is the issue's reproduction: a file:// template and
+// a key ID of "../secret".  The file outside the keys directory must never be
+// opened; the request fails validation first.
+func (suite *ResolverSuite) TestFileTemplateTraversal() {
+	dir := suite.T().TempDir()
+	suite.Require().NoError(os.Mkdir(filepath.Join(dir, "keys"), 0o755))
+	suite.Require().NoError(os.WriteFile(filepath.Join(dir, "secret.pem"), []byte("not a key"), 0o600))
+
+	r := suite.newResolver(WithKeyIDTemplate("file://" + dir + "/keys/{keyID}.pem"))
+
+	k, err := r.Resolve(context.Background(), "../secret")
+	suite.Nil(k)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrInvalidKeyID)
+}
+
+// TestKeyIDValidatorOption checks that a deployment can replace the default
+// rule.  The custom validator's error is wrapped so that ErrInvalidKeyID still
+// classifies it.
+func (suite *ResolverSuite) TestKeyIDValidatorOption() {
+	var (
+		f         = new(mockFetcher)
+		customErr = errors.New("not on the allow list")
+		r         = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate(testKeyIDURL),
+			WithKeyIDValidator(func(keyID string) error {
+				if keyID == "allowed/kid" {
+					return nil
+				}
+
+				return customErr
+			}),
+		)
+	)
+
+	// a kid the default would reject, but the custom validator allows
+	f.ExpectFetch(context.Background(), "https://example.com/allowed%2Fkid").
+		Return([]Key{withKeyID(suite.testKey, "allowed/kid")}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "allowed/kid")
+	suite.Require().NoError(err)
+	suite.Equal("allowed/kid", k.KeyID())
+
+	// a kid the default would accept, but the custom validator rejects
+	k, err = r.Resolve(context.Background(), "testKey")
+	suite.Nil(k)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, customErr)
+	suite.ErrorIs(err, ErrInvalidKeyID)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestKeyIDValidationSkippedForRingHits checks that validation guards the
+// fetch, not the ring: a key already on the ring resolves whatever its kid
+// looks like, since the ring's contents came from a trusted source.
+func (suite *ResolverSuite) TestKeyIDValidationSkippedForRingHits() {
+	var (
+		f     = new(mockFetcher) // expects no calls
+		weird = withKeyID(suite.testKey, "weird/kid")
+		r     = suite.newResolver(
+			WithFetcher(f),
+			WithKeyRing(NewKeyRing(weird)),
+			WithKeyIDTemplate(testKeyIDURL),
+		)
+	)
+
+	k, err := r.Resolve(context.Background(), "weird/kid")
+	suite.Require().NoError(err)
+	suite.Equal(weird, k)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestInvalidKeyIDDispatchesEvent checks that a rejected key ID is visible to
+// listeners: a ResolveEvent with the key ID, no URI, no key, and the error.
+// The validator exists to catch hostile input, so the zap listener must be able
+// to log a probe and the metrics listener must count it.
+func (suite *ResolverSuite) TestInvalidKeyIDDispatchesEvent() {
+	var (
+		f        = new(mockFetcher) // expects no calls
+		listener = new(mockResolveListener)
+		r        = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate(testKeyIDURL),
+		)
+	)
+
+	r.AddListener(listener)
+	listener.On("OnResolveEvent", mock.MatchedBy(func(e ResolveEvent) bool {
+		return e.KeyID == "a/b" && e.URI == "" && e.Key == nil && errors.Is(e.Err, ErrInvalidKeyID)
+	})).Once()
+
+	_, err := r.Resolve(context.Background(), "a/b")
+	suite.ErrorIs(err, ErrInvalidKeyID)
+
+	listener.AssertExpectations(suite.T())
 	f.AssertExpectations(suite.T())
 }
 
