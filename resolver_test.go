@@ -1262,6 +1262,73 @@ func (suite *ResolverSuite) TestTemplateOriginCheck() {
 	}
 }
 
+// TestResolveEventRedactsCredentials checks that a resolve event names the
+// expanded URI without the password, while the fetch itself uses it as is.
+func (suite *ResolverSuite) TestResolveEventRedactsCredentials() {
+	var (
+		f        = new(mockFetcher)
+		listener = new(mockResolveListener)
+		r        = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("https://user:hunter2@example.com/{keyID}"),
+		)
+	)
+
+	r.AddListener(listener)
+
+	f.ExpectFetch(context.Background(), "https://user:hunter2@example.com/testKey").
+		Return([]Key{suite.testKey}, ContentMeta{}, nil).
+		Once()
+
+	listener.On("OnResolveEvent", mock.MatchedBy(func(e ResolveEvent) bool {
+		return e.URI == "https://user:xxxxx@example.com/testKey" //nolint:gosec // test fixture, not a credential
+	})).Once()
+
+	k, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Equal(suite.testKey, k)
+
+	f.AssertExpectations(suite.T())
+	listener.AssertExpectations(suite.T())
+}
+
+// TestOriginErrorsRedactCredentials checks the errors the origin check produces
+// for a credentialed template: the location that fell outside the prefix, and a
+// location that could not be parsed at all.  Both reach the resolve event, which
+// the zap listener logs at error level.
+func (suite *ResolverSuite) TestOriginErrorsRedactCredentials() {
+	r := suite.newResolver(
+		WithKeyIDTemplate("https://user:hunter2@example.com/keys/{+keyID}"), //nolint:gosec // test fixture, not a credential
+		WithKeyIDValidator(nil),
+	)
+
+	_, err := r.Resolve(context.Background(), "../secret")
+	suite.Require().ErrorIs(err, ErrLocationOutsideTemplate)
+	suite.Contains(err.Error(), "user:xxxxx@")
+	suite.NotContains(err.Error(), "hunter2")
+
+	r = suite.newResolver(
+		WithKeyIDTemplate("https://user:hunter2@example.com/{keyID}/\x7f"), //nolint:gosec // test fixture, not a credential
+	)
+
+	_, err = r.Resolve(context.Background(), "testKey")
+	suite.Require().ErrorIs(err, ErrLocationOutsideTemplate)
+	suite.NotContains(err.Error(), "hunter2")
+}
+
+// TestUnsafeTemplateRedactsCredentials checks that a rejected template with
+// credentials does not put the password in the construction error.
+func (suite *ResolverSuite) TestUnsafeTemplateRedactsCredentials() {
+	for _, template := range []string{
+		"https://user:hunter2@{keyID}.example.com/keys", //nolint:gosec // test fixture, not a credential
+		"https://user:hunter2@example.com{keyID}",       //nolint:gosec // test fixture, not a credential
+	} {
+		_, err := NewResolver(WithKeyIDTemplate(template))
+		suite.Require().ErrorIs(err, ErrUnsafeTemplate, template)
+		suite.NotContains(err.Error(), "hunter2", template)
+	}
+}
+
 func TestResolver(t *testing.T) {
 	suite.Run(t, new(ResolverSuite))
 }

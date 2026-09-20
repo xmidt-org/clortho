@@ -14,13 +14,43 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// userinfoPassword matches the password of a URI's userinfo in text, for
+// strings that url.Parse rejects, such as a template with braces in its host.
+var userinfoPassword = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9+.-]*://[^/?#@]*:)[^/?#@]*@`)
+
+// redactURI returns location with any userinfo password replaced by "xxxxx",
+// as url.URL.Redacted does.  A location that does not parse is redacted
+// textually instead, so that a malformed template or an unparseable expansion
+// still does not leak a password.  Errors and events carry redacted locations
+// so that a source configured with credentials in its URI does not put them in
+// logs.
+func redactURI(location string) string {
+	if u, err := url.Parse(location); err == nil {
+		// leave a location with nothing to redact exactly as written, rather than
+		// re-encoding it
+		if _, hasPassword := u.User.Password(); !hasPassword {
+			return location
+		}
+
+		return u.Redacted()
+	}
+
+	return userinfoPassword.ReplaceAllString(location, "${1}xxxxx@")
+}
+
+// ErrInvalidLocation indicates that a location could not be parsed as a URL and
+// so no request was made for it.  The message quotes the location with any
+// password redacted.
+var ErrInvalidLocation = errors.New("location is not a valid URL")
+
 // UnsupportedSchemeError indicates that a URI's scheme was not registered
-// and couldn't be handled by a Loader.
+// and couldn't be handled by a Loader.  Location has any password redacted.
 type UnsupportedSchemeError struct {
 	Location string
 }
@@ -30,7 +60,7 @@ func (use *UnsupportedSchemeError) Error() string {
 }
 
 // NotAFileError indicates that a file URI didn't refer to a system file, but instead
-// referred to a directory, pipe, etc.
+// referred to a directory, pipe, etc.  Location has any password redacted.
 type NotAFileError struct {
 	Location string
 }
@@ -40,7 +70,7 @@ func (nafe *NotAFileError) Error() string {
 }
 
 // HTTPLoaderError indicates that an error occurred when transacting with a HTTP-based
-// source of key material.
+// source of key material.  Location has any password redacted.
 type HTTPLoaderError struct {
 	Location   string
 	StatusCode int
@@ -145,7 +175,7 @@ func (ls *loaders) LoadContent(ctx context.Context, location string) ([]byte, Co
 	}
 
 	return nil, ContentMeta{}, &UnsupportedSchemeError{
-		Location: location,
+		Location: redactURI(location),
 	}
 }
 
@@ -188,7 +218,16 @@ func (hl *HTTPLoader) newContext(parentCtx context.Context) (context.Context, co
 }
 
 func (hl *HTTPLoader) newRequest(ctx context.Context, location string) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, location, nil)
+	// parse first: the standard library's error quotes the raw location, which
+	// may carry a password
+	u, err := url.Parse(location)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidLocation, redactURI(location))
+	}
+
+	// with the URL already parsed, the only remaining failure is a nil context,
+	// whose error does not mention the URL
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +289,7 @@ func (hl *HTTPLoader) transact(req *http.Request) (*http.Response, []byte, error
 
 		if int64(len(data)) > limit {
 			return nil, nil, &ResponseTooLargeError{
-				Location: resp.Request.URL.String(),
+				Location: resp.Request.URL.Redacted(),
 				Limit:    limit,
 			}
 		}
@@ -259,7 +298,7 @@ func (hl *HTTPLoader) transact(req *http.Request) (*http.Response, []byte, error
 
 	default:
 		return nil, nil, &HTTPLoaderError{
-			Location:   resp.Request.URL.String(),
+			Location:   resp.Request.URL.Redacted(),
 			StatusCode: resp.StatusCode,
 		}
 	}
@@ -350,7 +389,7 @@ func (fl *FileLoader) readContent(location, path string, fi fs.FileInfo) ([]byte
 	// an FS doesn't complain if several non-regular file types are read
 	if fi.Mode()&fs.ModeType != 0 {
 		return nil, &NotAFileError{
-			Location: location, // use location instead of path, since that will help debugging
+			Location: redactURI(location), // use location instead of path, since that will help debugging
 		}
 	}
 
@@ -383,7 +422,7 @@ func (fl FileLoader) LoadContent(ctx context.Context, location string) ([]byte, 
 }
 
 // ResponseTooLargeError indicates that an HTTP response body exceeded the
-// loader's MaxReadLimit.
+// loader's MaxReadLimit.  Location has any password redacted.
 type ResponseTooLargeError struct {
 	Location string
 	Limit    int64
