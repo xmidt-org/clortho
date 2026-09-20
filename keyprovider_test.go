@@ -11,7 +11,10 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v4/jwa"
@@ -425,6 +428,7 @@ func (suite *KeyProviderSuite) TestVerifySuccessByKeyType() {
 		ringKey any
 		alg     jwa.SignatureAlgorithm
 		signKey any
+		opts    []KeyProviderOption
 	}{
 		{
 			name:    "RSA",
@@ -439,16 +443,20 @@ func (suite *KeyProviderSuite) TestVerifySuccessByKeyType() {
 			signKey: suite.p256Key,
 		},
 		{
+			// symmetric keys are rejected by default; see TestSymmetricKeyRejectedByDefault
 			name:    "Symmetric",
 			ringKey: suite.symmetricKey,
 			alg:     jwa.HS256(),
 			signKey: suite.symmetricKey,
+			opts:    []KeyProviderOption{WithAllowSymmetricKeys()},
 		},
 	}
 
 	for _, tc := range testCases {
 		suite.Run(tc.name, func() {
-			kp := suite.newKeyProvider("kid-1", tc.ringKey)
+			opts := append([]KeyProviderOption{WithKeyRing(suite.newRing("kid-1", tc.ringKey))}, tc.opts...)
+			kp, err := NewKeyProvider(opts...)
+			suite.Require().NoError(err)
 
 			payload, err := jws.Verify(
 				suite.sign(tc.alg, tc.signKey, "kid-1"),
@@ -459,6 +467,69 @@ func (suite *KeyProviderSuite) TestVerifySuccessByKeyType() {
 			suite.JSONEq(`{"sub":"test"}`, string(payload))
 		})
 	}
+}
+
+// newSymmetricRingFromJWKS serves a JWKS containing the suite's symmetric key,
+// fetches it through the default Fetcher exactly as a Refresher would, and
+// returns the resulting ring.  This is the issue's reproduction: a JWKS is
+// public, so a secret published in one is public too.
+func (suite *KeyProviderSuite) newSymmetricRingFromJWKS() KeyRing {
+	jk, err := jwk.Import[jwk.Key](suite.symmetricKey)
+	suite.Require().NoError(err)
+	suite.Require().NoError(jk.Set(jwk.KeyIDKey, "hmac-1"))
+
+	set := jwk.NewSet()
+	suite.Require().NoError(set.AddKey(jk))
+	body, err := json.Marshal(set)
+	suite.Require().NoError(err)
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", MediaTypeJWKSet)
+		_, _ = rw.Write(body)
+	}))
+	suite.T().Cleanup(server.Close)
+
+	keys, _, err := NewFetcher().Fetch(context.Background(), server.URL+"/keys")
+	suite.Require().NoError(err)
+	suite.Require().Len(keys, 1)
+	suite.Require().Equal("oct", keys[0].KeyType())
+
+	return NewKeyRing(keys...)
+}
+
+// TestSymmetricKeyRejectedByDefault checks that a symmetric key that arrived
+// through a JWKS is never offered for verification.  Anyone who could read the
+// JWKS has the secret and can mint tokens that verify with it.
+func (suite *KeyProviderSuite) TestSymmetricKeyRejectedByDefault() {
+	kp, err := NewKeyProvider(WithKeyRing(suite.newSymmetricRingFromJWKS()))
+	suite.Require().NoError(err)
+
+	forged := suite.sign(jwa.HS256(), suite.symmetricKey, "hmac-1")
+
+	var sink recordingSink
+	err = kp.FetchKeys(context.Background(), &sink, suite.signature(forged), nil)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrKeyProviderSymmetricKey)
+	suite.Empty(sink.algs, "the secret must not be offered to the verifier")
+
+	payload, err := jws.Verify(forged, jws.WithKeyProvider(kp))
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrKeyProviderSymmetricKey)
+	suite.Nil(payload)
+}
+
+// TestSymmetricKeyAllowed checks the opt-in for a deployment that genuinely
+// shares a secret, e.g. through a local file source.
+func (suite *KeyProviderSuite) TestSymmetricKeyAllowed() {
+	kp, err := NewKeyProvider(
+		WithKeyRing(suite.newSymmetricRingFromJWKS()),
+		WithAllowSymmetricKeys(),
+	)
+	suite.Require().NoError(err)
+
+	payload, err := jws.Verify(suite.sign(jwa.HS256(), suite.symmetricKey, "hmac-1"), jws.WithKeyProvider(kp))
+	suite.Require().NoError(err)
+	suite.JSONEq(`{"sub":"test"}`, string(payload))
 }
 
 // TestNoRefreshSources checks that a provider built with a Config that has no
