@@ -806,6 +806,29 @@ func (suite *LoaderSuite) TestHTTPBodyTruncated() {
 	suite.ErrorIs(err, io.ErrUnexpectedEOF)
 }
 
+// TestDefaultFileScheme checks that a Loader from NewLoader handles file:// URIs
+// without any option, as its documentation says.
+func (suite *LoaderSuite) TestDefaultFileScheme() {
+	path, fi := suite.createFile(".jwk", keyContent)
+
+	content, meta, err := suite.newLoader().LoadContent(context.Background(), "file://"+path)
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: ".jwk", LastModified: fi.ModTime()}, meta)
+}
+
+// TestDefaultBarePath checks that a Loader from NewLoader treats a location with
+// no scheme as a file system path, as its documentation says, rather than
+// handing it to the HTTP client.
+func (suite *LoaderSuite) TestDefaultBarePath() {
+	path, fi := suite.createFile(".pem", keyContent)
+
+	content, meta, err := suite.newLoader().LoadContent(context.Background(), path)
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(content))
+	suite.Equal(ContentMeta{Format: ".pem", LastModified: fi.ModTime()}, meta)
+}
+
 func TestLoader(t *testing.T) {
 	suite.Run(t, new(LoaderSuite))
 }
