@@ -6,7 +6,10 @@ package clortho
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -353,6 +356,87 @@ func (suite *RefresherSuite) TestWithConfig() {
 	suite.Require().NoError(err)
 	suite.Require().NotNil(r)
 	suite.Len(r.(*refresher).sources, 1)
+}
+
+// contextDepth counts how many values are layered onto a context.  The standard
+// library's contexts describe themselves as a chain, e.g.
+// "context.Background.WithCancel.WithValue(...)", so the count of WithValue
+// segments is the number of nested value wrappers.
+func contextDepth(ctx context.Context) int {
+	return strings.Count(fmt.Sprint(ctx), ".WithValue(")
+}
+
+// TestContextDoesNotGrow checks that the refresh loop derives each cycle's
+// context from its parent rather than from the previous cycle's context.  Each
+// Fetch must see the ContentMeta from the cycle before it, and the context
+// handed to Fetch must not gain a wrapper per cycle, which would be a leak that
+// grows for the life of the Refresher.
+func (suite *RefresherSuite) TestContextDoesNotGrow() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newRefresher(
+			WithFetcher(f),
+			WithSources(RefreshSource{URI: testHTTPSGet}),
+		)
+
+		fc      = suite.newClockFor(r)
+		timerCh = make(chan chronon.FakeTimer, 1)
+
+		// one distinct ContentMeta per cycle, so that each successful cycle has
+		// something new to carry into the next
+		metas = []ContentMeta{
+			{Format: MediaTypeJWKSet, LastModified: time.Unix(1000, 0)},
+			{Format: MediaTypeJWKSet, LastModified: time.Unix(2000, 0)},
+			{Format: MediaTypeJWKSet, LastModified: time.Unix(3000, 0)},
+			{Format: MediaTypeJWKSet, LastModified: time.Unix(4000, 0)},
+		}
+
+		lock     sync.Mutex
+		captured []context.Context
+	)
+
+	fc.NotifyOnTimer(timerCh)
+
+	for _, meta := range metas {
+		f.ExpectFetchCtx(func(context.Context) bool { return true }, testHTTPSGet).
+			Run(func(args mock.Arguments) {
+				lock.Lock()
+				defer lock.Unlock()
+				captured = append(captured, args.Get(0).(context.Context))
+			}).
+			Return(suite.set1, meta, nil).
+			Once()
+	}
+
+	suite.Require().NoError(r.Start(context.Background()))
+
+	timer := suite.getTimer(timerCh)
+	for range len(metas) - 1 {
+		fc.Set(timer.When())
+		timer = suite.getTimer(timerCh)
+	}
+
+	suite.Require().NoError(r.Stop(context.Background()))
+	f.AssertExpectations(suite.T())
+
+	lock.Lock()
+	defer lock.Unlock()
+	suite.Require().Len(captured, len(metas))
+
+	// the first fetch has no previous metadata; every later one carries the
+	// metadata from the cycle before it
+	first, _ := GetContentMeta(captured[0])
+	suite.Equal(ContentMeta{}, first)
+	for i := 1; i < len(captured); i++ {
+		got, _ := GetContentMeta(captured[i])
+		suite.Equal(metas[i-1], got, "fetch %d should carry the metadata from fetch %d", i, i-1)
+	}
+
+	// and the context must not accumulate a wrapper per cycle
+	depth := contextDepth(captured[0])
+	for i, ctx := range captured {
+		suite.Equal(depth, contextDepth(ctx), "fetch %d context has grown: %v", i, ctx)
+	}
 }
 
 func TestRefresher(t *testing.T) {
