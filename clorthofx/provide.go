@@ -115,14 +115,36 @@ func newRefresher(in RefresherIn) (r clortho.Refresher, err error) {
 
 // ResolverIn enumerates the set of components involved in the creation
 // of a clortho.Resolver.
-type ResolverIn RefresherIn
+type ResolverIn struct {
+	fx.In
+
+	// KeyRing is the ring the resolver uses as a cache.  This will be either supplied
+	// from the enclosing application or internally created within this module.
+	KeyRing clortho.KeyRing
+
+	Fetcher         clortho.Fetcher
+	Config          clortho.Config           `optional:"true"`
+	ZapListener     *clorthozap.Listener     `optional:"true"`
+	MetricsListener *clorthometrics.Listener `optional:"true"`
+
+	// Options are applied after the fetcher, ring, and Config.  An application
+	// supplies them as a []clortho.ResolverOption value, the same way it supplies
+	// []clortho.FetcherOption and []clortho.KeyProviderOption.  This is how an
+	// fx-wired application replaces the key ID validator, e.g. with
+	// clortho.WithKeyIDValidator for a deployment whose key IDs are URLs.
+	Options []clortho.ResolverOption `optional:"true"`
+}
 
 func newResolver(in ResolverIn) (r clortho.Resolver, err error) {
-	r, err = clortho.NewResolver(
+	opts := make([]clortho.ResolverOption, 0, 3+len(in.Options))
+	opts = append(opts,
 		clortho.WithFetcher(in.Fetcher),
 		clortho.WithKeyRing(in.KeyRing),
 		clortho.WithConfig(in.Config),
 	)
+	opts = append(opts, in.Options...)
+
+	r, err = clortho.NewResolver(opts...)
 
 	if err == nil {
 		if in.ZapListener != nil {
@@ -213,6 +235,8 @@ func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
 //     The refresher will be bound to the application lifecycle.
 //
 //   - clortho.Resolver
+//     A []clortho.ResolverOption value in the application, if any, is applied last, so
+//     that the default key ID validation can be replaced where a deployment needs it.
 //
 //   - clortho.KeyAccessor
 //     This is the same component as the key ring, but may be decorated in future versions.

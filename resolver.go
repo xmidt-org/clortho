@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/jtacoma/uritemplates"
 )
@@ -23,6 +25,12 @@ var (
 
 	// ErrKeyNotFound indicates that a key could not be resolved, e.g. a key ID did not exist.
 	ErrKeyNotFound = errors.New("no such key exists")
+
+	// ErrInvalidKeyID indicates that a key ID was rejected before being expanded
+	// into a URI.  See ValidateKeyID for the default rule and WithKeyIDValidator to
+	// change it.  A custom validator's error is wrapped so that this sentinel still
+	// classifies it.
+	ErrInvalidKeyID = errors.New("invalid key ID")
 
 	// ErrFetchPanicked is returned to goroutines that were waiting on a fetch which
 	// panicked in another goroutine.  The panic itself propagates in the goroutine
@@ -51,6 +59,39 @@ type ResolveListener interface {
 	// OnResolveEvent receives notifications for attempts to resolve keys.  This
 	// method must not panic.
 	OnResolveEvent(ResolveEvent)
+}
+
+// ValidateKeyID is the default rule a Resolver applies to a key ID before
+// expanding it into a URI.  The key ID is the one input to this package that
+// arrives from an unauthenticated party, and a URI template gives it a path
+// into a file system or an HTTP request.  This rule rejects, with
+// ErrInvalidKeyID: an empty key ID; a path separator, '/' or '\\'; the sequence
+// ".."; the URI delimiters '?', '#' and '%', the last because a reserved
+// expansion such as {+keyID} passes percent sequences through unencoded; and
+// any whitespace or control character.
+//
+// A deployment whose key IDs legitimately contain something on that list, such
+// as a URL, supplies its own rule with WithKeyIDValidator.
+func ValidateKeyID(keyID string) error {
+	if len(keyID) == 0 {
+		return fmt.Errorf("%w: empty", ErrInvalidKeyID)
+	}
+
+	if strings.Contains(keyID, "..") {
+		return fmt.Errorf("%w: %q contains \"..\"", ErrInvalidKeyID, keyID)
+	}
+
+	for _, c := range keyID {
+		switch {
+		case c == '/', c == '\\', c == '?', c == '#', c == '%':
+			return fmt.Errorf("%w: %q contains %q", ErrInvalidKeyID, keyID, c)
+
+		case unicode.IsSpace(c), unicode.IsControl(c):
+			return fmt.Errorf("%w: %q contains whitespace or a control character", ErrInvalidKeyID, keyID)
+		}
+	}
+
+	return nil
 }
 
 // Expander is the strategy for expanding a URI template.
@@ -84,6 +125,11 @@ type Resolver interface {
 	// returned under the requested kid; a single key with a different kid is
 	// reported as ErrKeyNotFound and never reaches the ring.
 	//
+	// A key ID that is not on the ring is validated before it is expanded into a
+	// URI, by ValidateKeyID unless WithKeyIDValidator was given; a rejected key ID
+	// fails with ErrInvalidKeyID, causes no fetch, and is reported to listeners as
+	// a ResolveEvent with the error set and no URI.
+	//
 	// Every unknown kid costs a fetch, and every kid answered with a kid-less key
 	// becomes its own ring entry; the ring has no eviction.  A Resolver exposed to
 	// untrusted kids can therefore be made to fetch and grow without bound, which
@@ -109,7 +155,8 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 		errs []error
 
 		r = &resolver{
-			pending: pendingResolverRequests{},
+			pending:        pendingResolverRequests{},
+			keyIDValidator: ValidateKeyID,
 		}
 	)
 
@@ -190,6 +237,10 @@ type resolver struct {
 	keyRing     KeyRing
 
 	keyIDExpander Expander
+
+	// keyIDValidator runs before a key ID is expanded into a URI.  nil disables
+	// validation; see WithKeyIDValidator.
+	keyIDValidator func(string) error
 }
 
 func (r *resolver) dispatch(event ResolveEvent) {
@@ -301,6 +352,25 @@ func (r *resolver) Resolve(ctx context.Context, keyID string) (k Key, err error)
 	var ok bool
 	if k, ok = r.checkKeyRing(keyID); ok {
 		return
+	}
+
+	// the ring's contents came from a trusted source, so a hit above needs no
+	// validation.  a miss is about to become a URI, and that does.  a rejection
+	// is dispatched like any other failed resolve, with no URI, so that listeners
+	// can log and count a probe.
+	if r.keyIDValidator != nil {
+		if verr := r.keyIDValidator(keyID); verr != nil {
+			if !errors.Is(verr, ErrInvalidKeyID) {
+				verr = fmt.Errorf("%w: %w", ErrInvalidKeyID, verr)
+			}
+
+			r.dispatch(ResolveEvent{
+				KeyID: keyID,
+				Err:   verr,
+			})
+
+			return nil, verr
+		}
 	}
 
 	r.resolveLock.Lock()

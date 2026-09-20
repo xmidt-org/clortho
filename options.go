@@ -127,6 +127,18 @@ func (rof resolverOptionFunc) applyToResolver(r *resolver) error {
 	return rof(r)
 }
 
+// WithKeyIDValidator replaces the rule a Resolver applies to a key ID before
+// expanding it into a URI.  The default is ValidateKeyID.  A validator's error
+// is returned from Resolve wrapped with ErrInvalidKeyID, unless it already
+// wraps it.  A nil validator disables validation entirely; do that only when
+// key IDs never come from an untrusted party.
+func WithKeyIDValidator(v func(keyID string) error) ResolverOption {
+	return resolverOptionFunc(func(r *resolver) error {
+		r.keyIDValidator = v
+		return nil
+	})
+}
+
 // WithKeyIDExpander establishes the Expander strategy used for resolving
 // individual keys.  Callers may use this option to associate a custom
 // Expander with a Resolver.
