@@ -8,43 +8,73 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/lestrrat-go/jwx/v4/jwa"
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/lestrrat-go/jwx/v4/jws"
 	"github.com/stretchr/testify/suite"
 	"github.com/xmidt-org/clortho"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 	"gopkg.in/h2non/gock.v1"
 )
 
 type ProvideSuite struct {
 	suite.Suite
 
-	// publicKey is an RSA public key with kid "kid-1", for adding to a ring
+	privateKey *rsa.PrivateKey
+
+	// publicJWK is the JSON of the public half of privateKey, with kid "kid-1"
+	publicJWK []byte
+
+	// publicKey is the same key as a clortho.Key, for adding to a ring directly
 	publicKey clortho.Key
 }
 
 func (suite *ProvideSuite) SetupSuite() {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	var err error
+	suite.privateKey, err = rsa.GenerateKey(rand.Reader, 2048)
 	suite.Require().NoError(err)
 
-	jk, err := jwk.Import[jwk.Key](&privateKey.PublicKey)
+	jk, err := jwk.Import[jwk.Key](&suite.privateKey.PublicKey)
 	suite.Require().NoError(err)
 	suite.Require().NoError(jk.Set(jwk.KeyIDKey, "kid-1"))
 
-	publicJWK, err := json.Marshal(jk)
+	suite.publicJWK, err = json.Marshal(jk)
 	suite.Require().NoError(err)
 
 	p, err := clortho.NewParser()
 	suite.Require().NoError(err)
-	keys, err := p.Parse(clortho.MediaTypeJWK, publicJWK)
+	keys, err := p.Parse(clortho.MediaTypeJWK, suite.publicJWK)
 	suite.Require().NoError(err)
 	suite.Require().Len(keys, 1)
 	suite.publicKey = keys[0]
+}
+
+// newSignedJWS signs a JWS with the suite's key, carrying kid "kid-1".
+func (suite *ProvideSuite) newSignedJWS() []byte {
+	headers := jws.NewHeaders()
+	suite.Require().NoError(headers.Set(jws.KeyIDKey, "kid-1"))
+
+	signed, err := jws.Sign(
+		[]byte(`{"sub":"test"}`),
+		jws.WithKey(jwa.RS256(), suite.privateKey, jws.WithProtectedHeaders(headers)),
+	)
+
+	suite.Require().NoError(err)
+	return signed
+}
+
+// newJWKServer serves the suite's public key as a single JWK.
+func (suite *ProvideSuite) newJWKServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.Header().Set("Content-Type", clortho.MediaTypeJWK)
+		_, _ = rw.Write(suite.publicJWK)
+	}))
 }
 
 func (suite *ProvideSuite) TearDownTest() {
@@ -127,68 +157,87 @@ func (suite *ProvideSuite) TestResolverNoTemplate() {
 	suite.Equal(suite.publicKey, key)
 }
 
-// newObservedLogger returns a logger whose warnings and above are captured.
-func (suite *ProvideSuite) newObservedLogger() (*zap.Logger, *observer.ObservedLogs) {
-	core, logs := observer.New(zap.WarnLevel)
-	return zap.New(core), logs
-}
+// TestKeyProvider checks that the module provides a jws.KeyProvider backed by the
+// module's key ring.  With no Config the ring is fed by the application, so keys
+// added to the ring are immediately usable for verification.
+func (suite *ProvideSuite) TestKeyProvider() {
+	var (
+		kr clortho.KeyRing
+		kp jws.KeyProvider
 
-// newApplicationKeyProvider builds the kind of jws.KeyProvider an application
-// wires up by hand today, to stand in for one provided outside the module.
-func (suite *ProvideSuite) newApplicationKeyProvider() jws.KeyProvider {
-	kp, err := clortho.NewKeyProvider(clortho.WithKeyRing(clortho.NewKeyRing()))
+		app = suite.newFxTest(
+			Provide(),
+			fx.Populate(&kr, &kp),
+		)
+	)
+
+	app.RequireStart()
+	defer app.RequireStop()
+
+	suite.Require().NotNil(kp)
+
+	// nothing in the ring yet
+	_, err := jws.Verify(suite.newSignedJWS(), jws.WithKeyProvider(kp))
+	suite.ErrorIs(err, clortho.ErrKeyProviderKeyNotFound)
+
+	kr.Add(suite.publicKey)
+
+	payload, err := jws.Verify(suite.newSignedJWS(), jws.WithKeyProvider(kp))
 	suite.Require().NoError(err)
-	return kp
+	suite.JSONEq(`{"sub":"test"}`, string(payload))
 }
 
-// TestKeyProviderNotice checks that an application which provides its own
-// jws.KeyProvider alongside this module is warned at startup: v0.4.0 will
-// provide one from the module, and fx refuses to start with two.  Startup itself
-// must still succeed.
-func (suite *ProvideSuite) TestKeyProviderNotice() {
-	logger, logs := suite.newObservedLogger()
+// TestKeyProviderNoRefreshSources checks that a Config with a resolve template and
+// no refresh sources fails at startup when the provider is injected, rather than
+// producing a provider whose ring never fills.
+func (suite *ProvideSuite) TestKeyProviderNoRefreshSources() {
+	var kp jws.KeyProvider
 
-	app := suite.newFxTest(
+	app := fx.New(
+		fx.NopLogger,
 		Provide(),
-		fx.Supply(logger),
-		fx.Provide(suite.newApplicationKeyProvider),
+		fx.Supply(clortho.Config{
+			Resolve: clortho.ResolveConfig{Template: "https://example.com/keys/{keyID}"},
+		}),
+		fx.Populate(&kp),
+	)
+
+	suite.Require().Error(app.Err())
+	suite.ErrorIs(app.Err(), clortho.ErrNoRefreshSources)
+	suite.Nil(kp)
+}
+
+// TestKeyProviderWithRefreshSources is the intended production wiring: a Config
+// with a refresh source, the refresher filling the ring on start, and the provider
+// verifying from it.
+func (suite *ProvideSuite) TestKeyProviderWithRefreshSources() {
+	server := suite.newJWKServer()
+	defer server.Close()
+
+	var (
+		kr clortho.KeyRing
+		kp jws.KeyProvider
+
+		app = suite.newFxTest(
+			Provide(),
+			fx.Supply(clortho.Config{
+				Refresh: clortho.RefreshConfig{
+					Sources: []clortho.RefreshSource{{URI: server.URL + "/keys"}},
+				},
+			}),
+			fx.Populate(&kr, &kp),
+		)
 	)
 
 	app.RequireStart()
 	defer app.RequireStop()
 
-	entries := logs.FilterMessageSnippet("jws.KeyProvider").All()
-	suite.Require().Len(entries, 1)
-	suite.Equal(zap.WarnLevel, entries[0].Level)
-	suite.Contains(entries[0].Message, "v0.4.0")
-}
+	// the refresher fetches in the background once started
+	suite.Require().Eventually(func() bool { return kr.Len() == 1 }, 5*time.Second, 10*time.Millisecond)
 
-// TestKeyProviderNoticeSilent checks that the warning is not emitted when the
-// application does not provide a jws.KeyProvider.
-func (suite *ProvideSuite) TestKeyProviderNoticeSilent() {
-	logger, logs := suite.newObservedLogger()
-
-	app := suite.newFxTest(
-		Provide(),
-		fx.Supply(logger),
-	)
-
-	app.RequireStart()
-	defer app.RequireStop()
-
-	suite.Empty(logs.FilterMessageSnippet("jws.KeyProvider").All())
-}
-
-// TestKeyProviderNoticeNoLogger checks that the detection tolerates an
-// application with no logger: nothing to warn through, but startup succeeds.
-func (suite *ProvideSuite) TestKeyProviderNoticeNoLogger() {
-	app := suite.newFxTest(
-		Provide(),
-		fx.Provide(suite.newApplicationKeyProvider),
-	)
-
-	app.RequireStart()
-	app.RequireStop()
+	payload, err := jws.Verify(suite.newSignedJWS(), jws.WithKeyProvider(kp))
+	suite.Require().NoError(err)
+	suite.JSONEq(`{"sub":"test"}`, string(payload))
 }
 
 // TODO: flesh these tests out with gock, possibly using

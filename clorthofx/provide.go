@@ -137,28 +137,39 @@ func newResolver(in ResolverIn) (r clortho.Resolver, err error) {
 	return
 }
 
-// keyProviderNoticeIn lets the module detect a jws.KeyProvider supplied by the
-// enclosing application without providing one itself.
-type keyProviderNoticeIn struct {
+// KeyProviderIn enumerates the set of components involved in the creation
+// of a jws.KeyProvider.
+type KeyProviderIn struct {
 	fx.In
 
-	Logger      *zap.Logger     `optional:"true"`
-	KeyProvider jws.KeyProvider `optional:"true"`
+	// KeyRing is the ring the provider verifies against.  This is the same ring
+	// the Refresher fills.
+	KeyRing clortho.KeyRing
+
+	// Config, when present and non-empty, is checked for at least one refresh
+	// source.  The provider does not otherwise read it.
+	Config clortho.Config `optional:"true"`
 }
 
-// warnOnApplicationKeyProvider logs a warning when the enclosing application
-// provides its own jws.KeyProvider.  Starting with v0.4.0 this module provides
-// one, and fx refuses to start an application with two unnamed providers of the
-// same type.  Both dependencies are optional, so this never affects the graph
-// and never fails startup.
-func warnOnApplicationKeyProvider(in keyProviderNoticeIn) {
-	if in.KeyProvider == nil || in.Logger == nil {
-		return
+// isZeroConfig reports whether cfg has nothing set at all.  An application with
+// no Config feeds the ring itself, so there is nothing to validate.
+func isZeroConfig(cfg clortho.Config) bool {
+	return len(cfg.Refresh.Sources) == 0 && cfg.Resolve == (clortho.ResolveConfig{})
+}
+
+// newKeyProvider creates the jws.KeyProvider component.  When a Config was
+// supplied, it is passed along so that NewKeyProvider rejects a configuration
+// with no refresh sources at startup, rather than leaving a ring that never fills.
+func newKeyProvider(in KeyProviderIn) (jws.KeyProvider, error) {
+	opts := []clortho.KeyProviderOption{
+		clortho.WithKeyRing(in.KeyRing),
 	}
 
-	in.Logger.Warn(
-		"this application provides its own jws.KeyProvider; starting with clortho v0.4.0, clorthofx provides one too, and fx will refuse to start with both. Before upgrading, drop the application's provider in favor of the module's, or give it a name.",
-	)
+	if !isZeroConfig(in.Config) {
+		opts = append(opts, clortho.WithConfig(in.Config))
+	}
+
+	return clortho.NewKeyProvider(opts...)
 }
 
 // newKeyAccessor just returns the key ring as is for now.
@@ -198,11 +209,14 @@ func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
 //     This is the same component as the key ring, but may be decorated in future versions.
 //     Clients that only need read access to the key ring should use this component.
 //
-// Starting with v0.4.0, this module will also provide jws.KeyProvider, built from the
-// key ring.  An application that provides its own jws.KeyProvider will then fail to
-// start with a duplicate-provide error.  This version detects that situation and logs a
-// warning at startup, if a *zap.Logger is available, so that such applications can drop
-// their own provider or name it before upgrading.
+//   - jws.KeyProvider
+//     Verifies JWS signatures against the key ring.  This is what a bascule token parser
+//     needs.  If a non-empty clortho.Config is supplied, it must have at least one refresh
+//     source, since the ring is filled only by the Refresher; a Config with only a resolve
+//     template fails at startup with clortho.ErrNoRefreshSources.  Like every fx
+//     constructor, this one runs only if something injects the provider.  An application
+//     that provides its own jws.KeyProvider will get a duplicate-provide error from fx;
+//     use fx.Decorate or a named value to combine the two.
 func Provide() fx.Option {
 	return fx.Module(
 		Module,
@@ -217,12 +231,12 @@ func Provide() fx.Option {
 			newRefresher,
 			newResolver,
 			newKeyAccessor,
+			newKeyProvider,
 		),
 		fx.Invoke(
 			// eagerly load the refresher so that it's background
 			// goroutine(s) start
 			func(clortho.Refresher) {},
-			warnOnApplicationKeyProvider,
 		),
 	)
 }
