@@ -2,6 +2,10 @@ module github.com/xmidt-org/clortho
 
 go 1.27.1
 
+// v0.4.0 exposed an API that is being replaced.  It has no adopters and
+// should not gain any.
+retract [v0.4.0, v0.4.1]
+
 require (
 	github.com/jtacoma/uritemplates v1.0.0
 	github.com/lestrrat-go/jwx/v4 v4.5.0
