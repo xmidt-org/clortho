@@ -84,7 +84,7 @@ type RefreshSource struct {
 	// percent early and ten percent late.  When the interval comes from a
 	// server TTL the late half is dropped, since the server said the content
 	// is stale after that, so 10 then means up to ten percent early.  The
-	// result is clipped to the min and max above.
+	// result is clipped to MinRefreshInterval and MaxRefreshInterval.
 	//
 	// Valid values are at least zero and less than one hundred; anything
 	// else, including zero, gets DefaultJitterPercentage.  Jitter cannot be
