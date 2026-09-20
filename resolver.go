@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"unicode"
@@ -31,6 +32,18 @@ var (
 	// change it.  A custom validator's error is wrapped so that this sentinel still
 	// classifies it.
 	ErrInvalidKeyID = errors.New("invalid key ID")
+
+	// ErrUnsafeTemplate indicates that a URI template lets the key ID decide where
+	// keys are fetched from, or has no literal origin at all, so no expansion of it
+	// could be checked.  A template must begin with a literal scheme and, for http
+	// and https, a literal host, and its variable must come after the path begins.
+	ErrUnsafeTemplate = errors.New("URI template must have a literal scheme, host, and path before its variable")
+
+	// ErrLocationOutsideTemplate indicates that an expanded location did not stay
+	// within the origin and path prefix of the template it came from, and was not
+	// fetched.  This is defense in depth behind ValidateKeyID: it holds even when a
+	// custom validator allows path characters.
+	ErrLocationOutsideTemplate = errors.New("resolved location is outside the configured template")
 
 	// ErrFetchPanicked is returned to goroutines that were waiting on a fetch which
 	// panicked in another goroutine.  The panic itself propagates in the goroutine
@@ -94,6 +107,106 @@ func ValidateKeyID(keyID string) error {
 	return nil
 }
 
+// templateOrigin is the literal part of a URI template that every expansion
+// must stay within: the scheme, the host including any port, and the path up to
+// the first variable.  For an opaque scheme such as urn:, which a custom Loader
+// may be registered for, the prefix is the opaque part up to the variable.
+type templateOrigin struct {
+	scheme     string
+	host       string
+	pathPrefix string
+	opaque     bool
+}
+
+// parseTemplateOrigin derives the origin from a URI template, or reports why
+// the template cannot be pinned to one.
+func parseTemplateOrigin(rawTemplate string) (*templateOrigin, error) {
+	prefix := rawTemplate
+	if i := strings.IndexByte(rawTemplate, '{'); i >= 0 {
+		prefix = rawTemplate[:i]
+	}
+
+	u, err := url.Parse(prefix)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnsafeTemplate, err)
+	}
+
+	switch {
+	case u.Scheme == "":
+		return nil, fmt.Errorf("%w: %q has no scheme before its variable", ErrUnsafeTemplate, rawTemplate)
+
+	case (u.Scheme == "http" || u.Scheme == "https") && u.Host == "":
+		return nil, fmt.Errorf("%w: %q has no host before its variable", ErrUnsafeTemplate, rawTemplate)
+
+	case u.Host == "" && u.Path == "" && u.Opaque != "":
+		// an opaque form, e.g. urn:keys:{keyID}; the literal opaque part is the prefix
+		return &templateOrigin{
+			scheme:     u.Scheme,
+			pathPrefix: u.Opaque,
+			opaque:     true,
+		}, nil
+
+	case u.Path == "":
+		return nil, fmt.Errorf("%w: %q places its variable before the path begins", ErrUnsafeTemplate, rawTemplate)
+	}
+
+	return &templateOrigin{
+		scheme:     u.Scheme,
+		host:       u.Host,
+		pathPrefix: u.Path,
+	}, nil
+}
+
+// canonicalPath reports whether p has no ".", ".." or empty segment.  A
+// legitimate key ID never needs those to reach its key, and refusing them means
+// the prefix comparison below cannot be defeated by a path that climbs out of
+// one prefix and into a sibling that happens to share its leading characters.
+// A trailing slash is allowed.
+func canonicalPath(p string) bool {
+	segments := strings.Split(p, "/")
+	for i, segment := range segments[1:] {
+		switch {
+		case segment == "." || segment == "..":
+			return false
+
+		case segment == "" && i != len(segments)-2:
+			return false
+		}
+	}
+
+	return true
+}
+
+// check reports whether an expanded location stays within the origin.
+func (to *templateOrigin) check(location string) error {
+	u, err := url.Parse(location)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrLocationOutsideTemplate, err)
+	}
+
+	inside := u.Scheme == to.scheme
+	if to.opaque {
+		inside = inside && strings.HasPrefix(u.Opaque, to.pathPrefix)
+	} else {
+		inside = inside && u.Host == to.host && canonicalPath(u.Path) && strings.HasPrefix(u.Path, to.pathPrefix)
+	}
+
+	if !inside {
+		return fmt.Errorf("%w: %q is not under %s", ErrLocationOutsideTemplate, location, to.String())
+	}
+
+	return nil
+}
+
+// String renders the origin the way a template author wrote it.
+func (to *templateOrigin) String() string {
+	if to.opaque {
+		return to.scheme + ":" + to.pathPrefix
+	}
+
+	return to.scheme + "://" + to.host + to.pathPrefix
+}
+
 // Expander is the strategy for expanding a URI template.
 type Expander interface {
 	// Expand takes a value map and returns the URI resulting from that expansion.
@@ -128,7 +241,10 @@ type Resolver interface {
 	// A key ID that is not on the ring is validated before it is expanded into a
 	// URI, by ValidateKeyID unless WithKeyIDValidator was given; a rejected key ID
 	// fails with ErrInvalidKeyID, causes no fetch, and is reported to listeners as
-	// a ResolveEvent with the error set and no URI.
+	// a ResolveEvent with the error set and no URI.  After expansion, the location
+	// must stay within the template's literal scheme, host, and path prefix, or it
+	// fails with ErrLocationOutsideTemplate, again with no fetch; see
+	// WithKeyIDTemplate.  A custom Expander is not subject to that check.
 	//
 	// Every unknown kid costs a fetch, and every kid answered with a kid-less key
 	// becomes its own ring entry; the ring has no eviction.  A Resolver exposed to
@@ -238,6 +354,10 @@ type resolver struct {
 
 	keyIDExpander Expander
 
+	// origin is derived from the key ID template and checked against every
+	// expansion.  It is nil for a custom Expander, which has no template.
+	origin *templateOrigin
+
 	// keyIDValidator runs before a key ID is expanded into a URI.  nil disables
 	// validation; see WithKeyIDValidator.
 	keyIDValidator func(string) error
@@ -300,6 +420,10 @@ func (r *resolver) fetchKey(ctx context.Context, keyID string) (location string,
 	location, err = r.keyIDExpander.Expand(map[string]any{
 		KeyIDParameterName: keyID,
 	})
+
+	if err == nil && r.origin != nil {
+		err = r.origin.check(location)
+	}
 
 	var keys []Key
 	if err == nil {

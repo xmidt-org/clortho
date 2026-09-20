@@ -992,6 +992,276 @@ func (suite *ResolverSuite) TestInvalidKeyIDDispatchesEvent() {
 	f.AssertExpectations(suite.T())
 }
 
+// TestUnsafeTemplateRejected checks that a template which lets the key ID
+// decide the origin, or that has no literal origin at all, is rejected at
+// construction.  No expansion of such a template can be checked afterward.
+func (suite *ResolverSuite) TestUnsafeTemplateRejected() {
+	for _, template := range []string{
+		"{keyID}",
+		"{+keyID}",
+		"https://{+keyID}/keys",
+		"https://{keyID}.example.com/keys",
+		"https://example.com{keyID}",
+		"https://{keyID}@example.com/keys",
+		"example.com/{keyID}",
+		"file://{keyID}",
+		"urn:{keyID}",
+		"https://example.com/\x7f/{keyID}",
+	} {
+		r, err := NewResolver(WithKeyIDTemplate(template))
+		suite.True(r == nil, "%q: a failed constructor must return a nil interface", template)
+		suite.Require().Error(err, "%q should be rejected", template)
+		suite.ErrorIs(err, ErrUnsafeTemplate, "%q", template)
+	}
+}
+
+// TestSafeTemplateAccepted pins the shapes that are fine: a literal scheme and
+// host with the variable somewhere in the path or later, a file directory with
+// the variable inside it, and the empty template that makes a ring-only Resolver.
+func (suite *ResolverSuite) TestSafeTemplateAccepted() {
+	for _, template := range []string{
+		"https://example.com/{keyID}",
+		"https://example.com/keys/{keyID}.pem",
+		"https://example.com:8443/keys/{+keyID}",
+		"https://example.com/keys?kid={keyID}",
+		"http://localhost/{keyID}",
+		"file:///var/keys/{keyID}.pem",
+		"urn:keys:{keyID}",
+		"",
+	} {
+		r, err := NewResolver(WithKeyIDTemplate(template))
+		suite.NoError(err, "%q should be accepted", template)
+		suite.NotNil(r, "%q", template)
+	}
+}
+
+// TestLocationOutsideTemplate checks the post-expansion guard with the key ID
+// validator disabled: a location that resolves outside the template's literal
+// path prefix is refused with no fetch, and listeners see the offending URI.
+func (suite *ResolverSuite) TestLocationOutsideTemplate() {
+	var (
+		f        = new(mockFetcher) // expects no calls
+		listener = new(mockResolveListener)
+		r        = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("https://example.com/keys/{+keyID}"),
+			WithKeyIDValidator(nil),
+		)
+	)
+
+	r.AddListener(listener)
+	listener.On("OnResolveEvent", mock.MatchedBy(func(e ResolveEvent) bool {
+		return e.Key == nil && e.URI != "" && errors.Is(e.Err, ErrLocationOutsideTemplate)
+	})).Twice()
+
+	for _, keyID := range []string{"../secret", "../../etc/passwd"} {
+		k, err := r.Resolve(context.Background(), keyID)
+		suite.Nil(k, "%q", keyID)
+		suite.Require().Error(err, "%q", keyID)
+		suite.ErrorIs(err, ErrLocationOutsideTemplate, "%q", keyID)
+	}
+
+	listener.AssertExpectations(suite.T())
+	f.AssertExpectations(suite.T())
+}
+
+// TestLocationInsideTemplateFetched pins that the guard is not stricter than
+// the template: with the validator disabled, a key ID containing a slash that
+// stays under the literal prefix is fetched.
+func (suite *ResolverSuite) TestLocationInsideTemplateFetched() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("https://example.com/keys/{+keyID}"),
+			WithKeyIDValidator(nil),
+		)
+	)
+
+	expected := withKeyID(suite.testKey, "2024/testKey")
+	f.ExpectFetch(context.Background(), "https://example.com/keys/2024/testKey").
+		Return([]Key{expected}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "2024/testKey")
+	suite.Require().NoError(err)
+	suite.Equal(expected, k)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestFileTemplateTraversalWithoutValidator checks that the origin guard closes
+// traversal on its own, independently of the key ID validator.
+func (suite *ResolverSuite) TestFileTemplateTraversalWithoutValidator() {
+	dir := suite.T().TempDir()
+	suite.Require().NoError(os.Mkdir(filepath.Join(dir, "keys"), 0o755))
+	suite.Require().NoError(os.WriteFile(filepath.Join(dir, "secret.pem"), []byte("not a key"), 0o600))
+
+	r := suite.newResolver(
+		WithKeyIDTemplate("file://"+dir+"/keys/{keyID}.pem"),
+		WithKeyIDValidator(nil),
+	)
+
+	k, err := r.Resolve(context.Background(), "../secret")
+	suite.Nil(k)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrLocationOutsideTemplate)
+}
+
+// TestCustomExpanderNotChecked documents the limit: a custom Expander has no
+// template to derive an origin from, so its locations are fetched as given.
+func (suite *ResolverSuite) TestCustomExpanderNotChecked() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDExpander(expanderFunc(func(any) (string, error) {
+				return "https://anywhere.example/key", nil
+			})),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), "https://anywhere.example/key").
+		Return([]Key{suite.testKey}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Equal(suite.testKey, k)
+
+	f.AssertExpectations(suite.T())
+}
+
+// expanderFunc adapts a function to the Expander interface for tests.
+type expanderFunc func(any) (string, error)
+
+func (ef expanderFunc) Expand(v any) (string, error) { return ef(v) }
+
+// TestOpaqueTemplateFetched checks that a custom opaque scheme, which a custom
+// Loader may be registered for, stays supported: the literal part after the
+// scheme is the prefix every expansion must keep.
+func (suite *ResolverSuite) TestOpaqueTemplateFetched() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("urn:keys:{keyID}"),
+		)
+	)
+
+	f.ExpectFetch(context.Background(), "urn:keys:testKey").
+		Return([]Key{suite.testKey}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "testKey")
+	suite.Require().NoError(err)
+	suite.Equal(suite.testKey, k)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestNonCanonicalLocationRefused checks that an expanded path must already be
+// canonical.  A prefix check alone is a string comparison, so with a template
+// whose literal ends mid-segment and the validator disabled, a key ID could
+// climb to a sibling that happens to share the prefix.  A legitimate key ID
+// never needs "..", "//" or "/./" to reach its key.
+func (suite *ResolverSuite) TestNonCanonicalLocationRefused() {
+	var (
+		f = new(mockFetcher)
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("https://example.com/key-{+keyID}"),
+			WithKeyIDValidator(nil),
+		)
+	)
+
+	for _, keyID := range []string{"x/../../key-other/deep", "a//b", "a/./b", "a/.", "a/.."} {
+		k, err := r.Resolve(context.Background(), keyID)
+		suite.Nil(k, "%q", keyID)
+		suite.Require().Error(err, "%q", keyID)
+		suite.ErrorIs(err, ErrLocationOutsideTemplate, "%q", keyID)
+	}
+
+	// and a canonical path under the prefix is still fetched
+	expected := withKeyID(suite.testKey, "a/b")
+	f.ExpectFetch(context.Background(), "https://example.com/key-a/b").
+		Return([]Key{expected}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "a/b")
+	suite.Require().NoError(err)
+	suite.Equal(expected, k)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestMalformedTemplateRejected checks a template whose origin is fine but whose
+// template syntax is not: the origin passes and the template parser reports the
+// error, which is not ErrUnsafeTemplate.
+func (suite *ResolverSuite) TestMalformedTemplateRejected() {
+	r, err := NewResolver(WithKeyIDTemplate("https://example.com/{keyID"))
+	suite.True(r == nil, "a failed constructor must return a nil interface")
+	suite.Require().Error(err)
+	suite.NotErrorIs(err, ErrUnsafeTemplate)
+}
+
+// TestLocationUnparseable checks the one way an expansion can fail to parse: a
+// literal after the variable that no URL may contain.  The origin check refuses
+// it rather than handing it to a loader.
+func (suite *ResolverSuite) TestLocationUnparseable() {
+	var (
+		f = new(mockFetcher) // expects no calls
+		r = suite.newResolver(
+			WithFetcher(f),
+			WithKeyIDTemplate("https://example.com/{keyID}/\x7f"),
+		)
+	)
+
+	k, err := r.Resolve(context.Background(), "testKey")
+	suite.Nil(k)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrLocationOutsideTemplate)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestTemplateOriginCheck exercises the origin comparison directly, including
+// the opaque form's failure, which no template can produce because the literal
+// prefix fixes the scheme, but which the type must still report correctly.
+func (suite *ResolverSuite) TestTemplateOriginCheck() {
+	var (
+		web    = &templateOrigin{scheme: "https", host: "example.com:8443", pathPrefix: "/keys/"}
+		opaque = &templateOrigin{scheme: "urn", pathPrefix: "keys:", opaque: true}
+	)
+
+	suite.Equal("https://example.com:8443/keys/", web.String())
+	suite.Equal("urn:keys:", opaque.String())
+
+	suite.NoError(web.check("https://example.com:8443/keys/abc"))
+	suite.NoError(web.check("https://example.com:8443/keys/abc/"))
+	suite.NoError(opaque.check("urn:keys:abc"))
+
+	for _, location := range []string{
+		"http://example.com:8443/keys/abc", // scheme
+		"https://example.com/keys/abc",     // port
+		"https://evil.example/keys/abc",    // host
+		"https://example.com:8443/other/",  // prefix
+		"https://example.com:8443/keys",    // prefix, one short
+	} {
+		err := web.check(location)
+		suite.Require().Error(err, location)
+		suite.ErrorIs(err, ErrLocationOutsideTemplate, location)
+		suite.ErrorContains(err, web.String(), location)
+	}
+
+	for _, location := range []string{"urn:other:abc", "urn:keys", "https://example.com/keys:abc"} {
+		err := opaque.check(location)
+		suite.Require().Error(err, location)
+		suite.ErrorIs(err, ErrLocationOutsideTemplate, location)
+		suite.ErrorContains(err, opaque.String(), location)
+	}
+}
+
 func TestResolver(t *testing.T) {
 	suite.Run(t, new(ResolverSuite))
 }
