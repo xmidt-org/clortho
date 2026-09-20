@@ -149,6 +149,13 @@ type KeyProviderIn struct {
 	// Config, when present and non-empty, is checked for at least one refresh
 	// source.  The provider does not otherwise read it.
 	Config clortho.Config `optional:"true"`
+
+	// Options are applied after the ring and the Config.  An application supplies
+	// them as a []clortho.KeyProviderOption value, the same way it supplies
+	// []clortho.FetcherOption for the Fetcher.  This is how an fx-wired application
+	// opts out of the provider's defaults, e.g. clortho.WithAllowSymmetricKeys for
+	// a deployment that shares a secret through a local file.
+	Options []clortho.KeyProviderOption `optional:"true"`
 }
 
 // isZeroConfig reports whether cfg has nothing set at all.  An application with
@@ -168,6 +175,8 @@ func newKeyProvider(in KeyProviderIn) (jws.KeyProvider, error) {
 	if !isZeroConfig(in.Config) {
 		opts = append(opts, clortho.WithConfig(in.Config))
 	}
+
+	opts = append(opts, in.Options...)
 
 	return clortho.NewKeyProvider(opts...)
 }
@@ -213,7 +222,10 @@ func newKeyAccessor(kr clortho.KeyRing) clortho.KeyAccessor {
 //     Verifies JWS signatures against the key ring.  This is what a bascule token parser
 //     needs.  If a non-empty clortho.Config is supplied, it must have at least one refresh
 //     source, since the ring is filled only by the Refresher; a Config with only a resolve
-//     template fails at startup with clortho.ErrNoRefreshSources.  Like every fx
+//     template fails at startup with clortho.ErrNoRefreshSources.  A
+//     []clortho.KeyProviderOption value in the application, if any, is applied last, so
+//     that the provider's defaults (rejecting symmetric keys and keys not marked for
+//     signature use) can be relaxed where a deployment needs it.  Like every fx
 //     constructor, this one runs only if something injects the provider.  An application
 //     that provides its own jws.KeyProvider will get a duplicate-provide error from fx;
 //     use fx.Decorate or a named value to combine the two.

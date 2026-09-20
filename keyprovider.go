@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/lestrrat-go/jwx/v4/jwa"
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/lestrrat-go/jwx/v4/jws"
 )
@@ -29,6 +30,12 @@ var (
 	// its JWK "use" member, for something other than signature verification.  This
 	// check is on by default; see WithIgnoreKeyUsage.
 	ErrKeyProviderKeyUsage = errors.New("key is not marked for signature use")
+
+	// ErrKeyProviderSymmetricKey indicates that the key found on the ring is a
+	// symmetric (kty "oct") key.  Such keys are rejected by default: a JWKS is
+	// public, so a secret published in one is known to anyone who fetched it, and
+	// any HMAC token bearing its kid would verify.  See WithAllowSymmetricKeys.
+	ErrKeyProviderSymmetricKey = errors.New("symmetric keys are not accepted for signature verification")
 
 	// ErrKeyProviderKeyImport indicates that the key found on the ring could not be
 	// converted into a form jwx can verify with.  It is joined with the jwx error.
@@ -57,6 +64,13 @@ var (
 // source, returning ErrNoRefreshSources otherwise.  That turns the most common
 // misconfiguration, a resolve template with no refresh sources, into a startup error
 // rather than a "key not found" on every token.
+//
+// Two checks apply to every key the provider takes from the ring, both on by default.
+// A key whose JWK "use" is set to something other than "sig" is rejected with
+// ErrKeyProviderKeyUsage; see WithIgnoreKeyUsage.  A symmetric (kty "oct") key is
+// rejected with ErrKeyProviderSymmetricKey, because a secret that reached the ring
+// through a public JWKS lets anyone who read that JWKS mint tokens; see
+// WithAllowSymmetricKeys.
 //
 // If no key ring is supplied, or if any option returns an error, this function returns
 // a nil jws.KeyProvider along with a non-nil error.  Callers must not use the returned
@@ -89,6 +103,11 @@ type keyProvider struct {
 	// The zero value enforces the check, matching RFC 7517 and jwx's own key set
 	// provider; see WithIgnoreKeyUsage.
 	ignoreKeyUsage bool
+
+	// allowSymmetricKeys accepts kty "oct" keys from the ring.  The zero value
+	// rejects them, since a secret that reached the ring through a JWKS is not a
+	// secret; see WithAllowSymmetricKeys.
+	allowSymmetricKeys bool
 }
 
 func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.Signature, _ *jws.Message) error {
@@ -120,6 +139,13 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 	key, err := jwk.Import[jwk.Key](ckey.Raw())
 	if err != nil {
 		return errors.Join(ErrKeyProviderKeyImport, err)
+	}
+
+	// A symmetric key on the ring most likely arrived through a JWKS, which is
+	// public, so the "secret" is known to everyone who fetched it.  jwx would
+	// happily verify an HMAC token with it; refuse before it gets the chance.
+	if !kp.allowSymmetricKeys && key.KeyType() == jwa.OctetSeq() {
+		return fmt.Errorf(`%w: key with kid %q has type %q`, ErrKeyProviderSymmetricKey, kid, key.KeyType())
 	}
 
 	hdrAlg, ok := sig.ProtectedHeaders().Algorithm()

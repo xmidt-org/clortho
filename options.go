@@ -314,6 +314,21 @@ func WithIgnoreKeyUsage() KeyProviderOption {
 	})
 }
 
+// WithAllowSymmetricKeys makes a jws.KeyProvider accept symmetric (kty "oct")
+// keys from its ring.
+//
+// By default such keys are rejected with ErrKeyProviderSymmetricKey.  A JWKS is
+// public, so a secret published in one, by mistake or otherwise, is known to
+// anyone who fetched it, and any HMAC token carrying its kid would verify.  Use
+// this option only when the ring is fed from a source that is genuinely private
+// to the verifier, such as a local file, and the shared secret is intended.
+func WithAllowSymmetricKeys() KeyProviderOption {
+	return keyProviderOptionFunc(func(kp *keyProvider) error {
+		kp.allowSymmetricKeys = true
+		return nil
+	})
+}
+
 // WithEnforceKeyUsage selects the default behavior, rejecting keys whose JWK
 // "use" member is set to something other than "sig".
 //
