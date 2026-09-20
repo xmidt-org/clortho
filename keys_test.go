@@ -4,6 +4,7 @@
 package clortho
 
 import (
+	"crypto"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -75,6 +76,33 @@ func (suite *KeysSuite) TestAppendKeyIDs() {
 		keyIDs := Keys{}.AppendKeyIDs(nil)
 		suite.Empty(keyIDs)
 	})
+}
+
+// TestEnsureKeyIDMarksGenerated checks that a key ID assigned by EnsureKeyID is
+// distinguishable from one that came from the source material.  A Resolver
+// relies on that to tell "this key has a different kid" from "this key had no
+// kid at all".
+func (suite *KeysSuite) TestEnsureKeyIDMarksGenerated() {
+	p, err := NewParser()
+	suite.Require().NoError(err)
+
+	keys, err := p.Parse(MediaTypeJWKSet, []byte(resolverTestKeySet))
+	suite.Require().NoError(err)
+	suite.Require().Len(keys, 3)
+
+	withoutKid, withKid := keys[0], keys[1]
+	suite.Require().Empty(withoutKid.KeyID())
+	suite.Require().Equal("testKey", withKid.KeyID())
+
+	updated, err := EnsureKeyID(withoutKid, crypto.SHA256)
+	suite.Require().NoError(err)
+	suite.NotEmpty(updated.KeyID())
+	suite.True(keyIDGenerated(updated), "a thumbprint kid must be marked as generated")
+
+	same, err := EnsureKeyID(withKid, crypto.SHA256)
+	suite.Require().NoError(err)
+	suite.Same(withKid, same)
+	suite.False(keyIDGenerated(same), "a kid from the source must not be marked as generated")
 }
 
 func TestKeys(t *testing.T) {

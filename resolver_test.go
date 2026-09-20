@@ -5,6 +5,7 @@ package clortho
 
 import (
 	"context"
+	"crypto"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -771,6 +772,79 @@ func (suite *ResolverSuite) TestWithConfigNoTemplate() {
 	suite.Nil(key)
 	suite.Require().Error(err)
 	suite.ErrorIs(err, ErrNoTemplate)
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestSingleKeyKidMismatch checks that a one-key response whose kid differs
+// from the request is not accepted.  Any endpoint with a catch-all response
+// would otherwise turn every unknown kid into a valid key, and the ring would
+// gain a key under a kid nobody asked for.
+func (suite *ResolverSuite) TestSingleKeyKidMismatch() {
+	var (
+		f    = new(mockFetcher)
+		ring = NewKeyRing()
+		r    = suite.newResolver(
+			WithFetcher(f),
+			WithKeyRing(ring),
+			WithKeyIDTemplate(testKeyIDURL),
+		)
+	)
+
+	// the server answers the request for "requested" with the key for "testKey"
+	f.ExpectFetch(context.Background(), "https://example.com/requested").
+		Return([]Key{suite.testKey}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "requested")
+	suite.Nil(k)
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrKeyNotFound)
+	suite.Zero(ring.Len(), "a mismatched key must not reach the ring")
+
+	f.AssertExpectations(suite.T())
+}
+
+// TestSingleKeyWithoutKidAdopted checks that a one-key response whose key had
+// no kid in the source material is treated as the answer to the request: the
+// returned key carries the requested kid, and the ring holds it under that kid
+// so the next Resolve for it is a ring hit.
+func (suite *ResolverSuite) TestSingleKeyWithoutKidAdopted() {
+	var (
+		f    = new(mockFetcher)
+		ring = NewKeyRing()
+		r    = suite.newResolver(
+			WithFetcher(f),
+			WithKeyRing(ring),
+			WithKeyIDTemplate(testKeyIDURL),
+		)
+	)
+
+	// the first key in the set has no kid; a real Fetcher would have run
+	// EnsureKeyID on it, giving it a thumbprint kid marked as generated
+	suite.Require().Empty(suite.testKeySet[0].KeyID())
+	fetched, err := EnsureKeyID(suite.testKeySet[0], crypto.SHA256)
+	suite.Require().NoError(err)
+
+	f.ExpectFetch(context.Background(), "https://example.com/requested").
+		Return([]Key{fetched}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "requested")
+	suite.Require().NoError(err)
+	suite.Require().NotNil(k)
+	suite.Equal("requested", k.KeyID())
+	suite.Equal(fetched.Raw(), k.Raw(), "the adopted key must carry the fetched material")
+
+	onRing, ok := ring.Get("requested")
+	suite.Require().True(ok, "the key must be on the ring under the requested kid")
+	suite.Equal(k, onRing)
+	suite.Equal(1, ring.Len())
+
+	// now a ring hit, no fetch
+	again, err := r.Resolve(context.Background(), "requested")
+	suite.Require().NoError(err)
+	suite.Equal(k, again)
 
 	f.AssertExpectations(suite.T())
 }
