@@ -303,6 +303,20 @@ type keyProviderOptionFunc func(*keyProvider) error
 
 func (kpof keyProviderOptionFunc) apply(kp *keyProvider) error { return kpof(kp) }
 
+// WithEnforceKeyUsage makes a jws.KeyProvider reject any key whose JWK "use"
+// member is set to something other than "sig", with ErrKeyProviderKeyUsage.
+// RFC 7517 section 4.2 says such keys are not meant for signature verification.
+//
+// This is off by default: a provider built without this option verifies with
+// any key on its ring regardless of "use", which is what every version so far
+// has done.
+func WithEnforceKeyUsage() KeyProviderOption {
+	return keyProviderOptionFunc(func(kp *keyProvider) error {
+		kp.enforceKeyUsage = true
+		return nil
+	})
+}
+
 // WithRingKey associates a KeyRing with a jws.KeyProvider.
 //
 // Deprecated: the name is backwards; it takes a KeyRing.  Use WithKeyRing, which

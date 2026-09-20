@@ -122,6 +122,21 @@ func (suite *KeyProviderSuite) newRingWith(kid string) KeyRing {
 	return suite.newRing(kid, &suite.privateKey.PublicKey)
 }
 
+// newRingWithUsage returns a ring holding the suite's public key under kid, with
+// the JWK "use" member set to usage as it would be when parsed from a JWKS.
+func (suite *KeyProviderSuite) newRingWithUsage(kid, usage string) KeyRing {
+	jk, err := jwk.Import[jwk.Key](&suite.privateKey.PublicKey)
+	suite.Require().NoError(err)
+	suite.Require().NoError(jk.Set(jwk.KeyIDKey, kid))
+	suite.Require().NoError(jk.Set(jwk.KeyUsageKey, usage))
+
+	k, err := convertJWKKey(jk)
+	suite.Require().NoError(err)
+	suite.Require().Equal(usage, k.KeyUsage())
+
+	return NewKeyRing(k)
+}
+
 // TestNoOptions is the regression guard for the nil key ring panic.
 func (suite *KeyProviderSuite) TestNoOptions() {
 	kp, err := NewKeyProvider()
@@ -494,6 +509,58 @@ func (suite *KeyProviderSuite) TestDeprecatedWithRingKey() {
 	payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
 	suite.Require().NoError(err)
 	suite.JSONEq(`{"sub":"test"}`, string(payload))
+}
+
+// TestKeyUsageNotEnforcedByDefault pins the default: a key marked for a use
+// other than signing still verifies, as it always has.  Enforcement is opt-in so
+// that no existing deployment changes behavior.
+func (suite *KeyProviderSuite) TestKeyUsageNotEnforcedByDefault() {
+	kp, err := NewKeyProvider(WithKeyRing(suite.newRingWithUsage("kid-1", jwk.ForEncryption.String())))
+	suite.Require().NoError(err)
+
+	payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
+	suite.Require().NoError(err)
+	suite.JSONEq(`{"sub":"test"}`, string(payload))
+}
+
+// TestKeyUsageEnforced checks WithEnforceKeyUsage: a key whose use is anything
+// other than sig is rejected with ErrKeyProviderKeyUsage, while sig and an
+// absent use are accepted.  The use comes from the JWKS, via the clortho Key,
+// since the jwx key rebuilt from raw material never carries one.
+func (suite *KeyProviderSuite) TestKeyUsageEnforced() {
+	testCases := []struct {
+		name     string
+		usage    string
+		rejected bool
+	}{
+		{name: "Encryption", usage: jwk.ForEncryption.String(), rejected: true},
+		{name: "Custom", usage: "something-else", rejected: true},
+		{name: "Signature", usage: jwk.ForSignature.String(), rejected: false},
+		{name: "Unset", usage: "", rejected: false},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			ring := suite.newRingWith("kid-1")
+			if tc.usage != "" {
+				ring = suite.newRingWithUsage("kid-1", tc.usage)
+			}
+
+			kp, err := NewKeyProvider(WithKeyRing(ring), WithEnforceKeyUsage())
+			suite.Require().NoError(err)
+
+			payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
+			if tc.rejected {
+				suite.Require().Error(err)
+				suite.ErrorIs(err, ErrKeyProviderKeyUsage)
+				suite.Nil(payload)
+				return
+			}
+
+			suite.Require().NoError(err)
+			suite.JSONEq(`{"sub":"test"}`, string(payload))
+		})
+	}
 }
 
 func TestKeyProvider(t *testing.T) {
