@@ -32,7 +32,7 @@ var (
 
 	// ErrKeyProviderNoKeyRing indicates that no KeyRing was supplied to NewKeyProvider.
 	// A key ring is required, as it is the only source of keys for verification.
-	ErrKeyProviderNoKeyRing = errors.New("key provider requires a key ring; see WithRingKey")
+	ErrKeyProviderNoKeyRing = errors.New("key provider requires a key ring; see WithKeyRing")
 
 	// ErrNoRefreshSources indicates that a Config supplied to NewKeyProvider has no
 	// refresh sources.  Keys are served to the verifier from the refreshed key ring,
@@ -44,7 +44,7 @@ var (
 // NewKeyProvider constructs a jws.KeyProvider that draws keys from a KeyRing, matching
 // the kid in a JWS protected header against the keys the ring currently holds.
 //
-// A KeyRing is required; supply one with WithRingKey.  Note that the ring is the only
+// A KeyRing is required; supply one with WithKeyRing.  Note that the ring is the only
 // source of keys for verification: a Resolver is deliberately not consulted, so that an
 // unverified kid cannot trigger an outbound fetch.  Keys reach the ring by way of a
 // Refresher configured from Config.Refresh.Sources.  Config.Resolve is not involved.
