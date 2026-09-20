@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -113,11 +114,16 @@ func defaultLoader() *loaders {
 		Timeout:      30 * time.Second,
 	}
 
+	fl := FileLoader{
+		Root: os.DirFS("/"),
+	}
+
 	return &loaders{
 		l: map[string]Loader{
 			"http":  hl,
 			"https": hl,
-			"":      hl, // the default, when no scheme is present in the URI
+			"file":  fl,
+			"":      fl, // the default, when no scheme is present in the URI
 		},
 	}
 }
@@ -314,6 +320,9 @@ func (hl HTTPLoader) LoadContent(ctx context.Context, location string) ([]byte, 
 type FileLoader struct {
 	// Root is the relative root against which all location paths are resolved.
 	// This field is required.
+	//
+	// The Loader created by NewLoader uses os.DirFS("/") for this field, so
+	// that absolute paths and file:// URIs resolve naturally.
 	Root fs.FS
 }
 
