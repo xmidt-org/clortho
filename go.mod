@@ -11,6 +11,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/stretchr/testify v1.12.1
 	github.com/xmidt-org/chronon v0.1.15
+	github.com/xmidt-org/eventor v1.0.51
 	github.com/xmidt-org/touchstone v0.1.8
 	go.uber.org/fx v1.24.0
 	go.uber.org/zap v1.28.0

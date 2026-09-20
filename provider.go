@@ -12,6 +12,7 @@ import (
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/lestrrat-go/jwx/v4/jws"
 	"github.com/xmidt-org/chronon"
+	"github.com/xmidt-org/eventor"
 )
 
 // SourceStatus is the last outcome for one source, as reported by
@@ -61,7 +62,7 @@ type Provider struct {
 	verify  VerifyConfig
 
 	ring      ring
-	listeners listeners
+	listeners eventor.Eventor[Listener]
 	clock     chronon.Clock
 
 	stateLock sync.Mutex
@@ -163,14 +164,15 @@ func (p *Provider) Stop(ctx context.Context) error {
 }
 
 // AddListener registers a sink for RefreshEvents.  Only events after this call
-// are delivered.  The returned closure removes the listener and is idempotent.
-func (p *Provider) AddListener(l Listener) CancelListenerFunc {
-	return p.listeners.addListener(l)
+// are delivered.  The returned closure removes the listener; calling it more
+// than once has no further effect.
+func (p *Provider) AddListener(l Listener) (cancel func()) {
+	return p.listeners.Add(l)
 }
 
 func (p *Provider) dispatch(event RefreshEvent) {
-	p.listeners.visit(func(l any) {
-		l.(Listener).OnRefreshEvent(event)
+	p.listeners.Visit(func(l Listener) {
+		l.OnRefreshEvent(event)
 	})
 }
 
