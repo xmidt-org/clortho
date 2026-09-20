@@ -511,11 +511,26 @@ func (suite *KeyProviderSuite) TestDeprecatedWithRingKey() {
 	suite.JSONEq(`{"sub":"test"}`, string(payload))
 }
 
-// TestKeyUsageNotEnforcedByDefault pins the default: a key marked for a use
-// other than signing still verifies, as it always has.  Enforcement is opt-in so
-// that no existing deployment changes behavior.
-func (suite *KeyProviderSuite) TestKeyUsageNotEnforcedByDefault() {
+// TestKeyUsageEnforcedByDefault pins the default: a key marked for a use other
+// than signing is rejected with no option given, matching RFC 7517 section 4.2
+// and jwx's own key set provider.
+func (suite *KeyProviderSuite) TestKeyUsageEnforcedByDefault() {
 	kp, err := NewKeyProvider(WithKeyRing(suite.newRingWithUsage("kid-1", jwk.ForEncryption.String())))
+	suite.Require().NoError(err)
+
+	payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrKeyProviderKeyUsage)
+	suite.Nil(payload)
+}
+
+// TestKeyUsageIgnored checks the opt-out: with WithIgnoreKeyUsage, a key marked
+// for encryption still verifies, which is what every release before v0.4.0 did.
+func (suite *KeyProviderSuite) TestKeyUsageIgnored() {
+	kp, err := NewKeyProvider(
+		WithKeyRing(suite.newRingWithUsage("kid-1", jwk.ForEncryption.String())),
+		WithIgnoreKeyUsage(),
+	)
 	suite.Require().NoError(err)
 
 	payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
@@ -523,10 +538,23 @@ func (suite *KeyProviderSuite) TestKeyUsageNotEnforcedByDefault() {
 	suite.JSONEq(`{"sub":"test"}`, string(payload))
 }
 
-// TestKeyUsageEnforced checks WithEnforceKeyUsage: a key whose use is anything
-// other than sig is rejected with ErrKeyProviderKeyUsage, while sig and an
-// absent use are accepted.  The use comes from the JWKS, via the clortho Key,
-// since the jwx key rebuilt from raw material never carries one.
+// TestDeprecatedWithEnforceKeyUsage pins the deprecated option: it selects the
+// default, so it must keep working until it is removed.
+func (suite *KeyProviderSuite) TestDeprecatedWithEnforceKeyUsage() {
+	kp, err := NewKeyProvider(
+		WithKeyRing(suite.newRingWithUsage("kid-1", jwk.ForEncryption.String())),
+		WithEnforceKeyUsage(), //nolint:staticcheck // deliberately exercising the deprecated option
+	)
+	suite.Require().NoError(err)
+
+	_, err = jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
+	suite.ErrorIs(err, ErrKeyProviderKeyUsage)
+}
+
+// TestKeyUsageEnforced checks each use value under the default: anything other
+// than sig is rejected with ErrKeyProviderKeyUsage, while sig and an absent use
+// are accepted.  The use comes from the JWKS, via the clortho Key, since the
+// jwx key rebuilt from raw material never carries one.
 func (suite *KeyProviderSuite) TestKeyUsageEnforced() {
 	testCases := []struct {
 		name     string
@@ -546,7 +574,7 @@ func (suite *KeyProviderSuite) TestKeyUsageEnforced() {
 				ring = suite.newRingWithUsage("kid-1", tc.usage)
 			}
 
-			kp, err := NewKeyProvider(WithKeyRing(ring), WithEnforceKeyUsage())
+			kp, err := NewKeyProvider(WithKeyRing(ring))
 			suite.Require().NoError(err)
 
 			payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))

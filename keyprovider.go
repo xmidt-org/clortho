@@ -26,8 +26,8 @@ var (
 	ErrKeyProviderMissingAlg = errors.New(`protected header must contain an "alg" field`)
 
 	// ErrKeyProviderKeyUsage indicates that the key found on the ring is marked, via
-	// its JWK "use" member, for something other than signature verification.  This is
-	// only reported when the provider was built with WithEnforceKeyUsage.
+	// its JWK "use" member, for something other than signature verification.  This
+	// check is on by default; see WithIgnoreKeyUsage.
 	ErrKeyProviderKeyUsage = errors.New("key is not marked for signature use")
 
 	// ErrKeyProviderKeyImport indicates that the key found on the ring could not be
@@ -85,10 +85,10 @@ func NewKeyProvider(opts ...KeyProviderOption) (jws.KeyProvider, error) {
 type keyProvider struct {
 	keyRing KeyRing
 
-	// enforceKeyUsage rejects keys whose "use" is set to anything other than sig.
-	// Off by default, so that existing deployments keep verifying with keys their
-	// JWKS marks for encryption; see WithEnforceKeyUsage.
-	enforceKeyUsage bool
+	// ignoreKeyUsage accepts keys whose "use" is set to anything other than sig.
+	// The zero value enforces the check, matching RFC 7517 and jwx's own key set
+	// provider; see WithIgnoreKeyUsage.
+	ignoreKeyUsage bool
 }
 
 func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.Signature, _ *jws.Message) error {
@@ -111,7 +111,7 @@ func (kp keyProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.
 	// The "use" member lives on the clortho Key, which kept it from the JWKS.  The
 	// jwx key rebuilt below from raw material never carries one, so the check has
 	// to happen here.
-	if kp.enforceKeyUsage {
+	if !kp.ignoreKeyUsage {
 		if usage := ckey.KeyUsage(); usage != "" && usage != jwk.ForSignature.String() {
 			return fmt.Errorf(`%w: key with kid %q is marked use=%q (expected %q)`, ErrKeyProviderKeyUsage, kid, usage, jwk.ForSignature.String())
 		}
