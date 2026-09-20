@@ -79,14 +79,17 @@ type RefreshSource struct {
 	// effective MinRefreshInterval is raised to it.
 	MaxRefreshInterval time.Duration
 
-	// JitterFraction spreads each refresh over a window around its computed
-	// interval: a refresh fires at a random point in
-	// [1-JitterFraction, 1+JitterFraction] times the interval, then clipped to
-	// the min and max above.  0.1 is plus or minus ten percent.  Valid values
-	// are at least zero and less than one; anything else, including zero, gets
-	// DefaultJitterFraction.  Jitter cannot be turned off, since its purpose is
-	// to keep a fleet that started together from polling the key server in
-	// lockstep.
+	// JitterFraction is a percentage, plus or minus, applied to every refresh
+	// interval: 0.1 means each refresh fires at a random point between ten
+	// percent early and ten percent late.  When the interval comes from a
+	// server TTL the late half is dropped, since the server said the content
+	// is stale after that, so 0.1 then means up to ten percent early.  The
+	// result is clipped to the min and max above.
+	//
+	// Valid values are at least zero and less than one; anything else,
+	// including zero, gets DefaultJitterFraction.  Jitter cannot be turned
+	// off, since its purpose is to keep a fleet that started together from
+	// polling the key server in lockstep.
 	JitterFraction float64
 
 	// Client makes the requests for an http or https URI.  It owns timeout,

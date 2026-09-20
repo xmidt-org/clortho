@@ -8,21 +8,20 @@ import (
 	"time"
 )
 
-// jitterer computes the time until a source's next refresh: a random point in
-// a window around the base interval, clipped to the source's minimum and
-// maximum.  Every interval it returns lies within those bounds, whatever the
-// configuration or the metadata a source serves.
+// jitterer computes the time until a source's next refresh: a random point
+// within JitterFraction either side of the base interval, clipped to the
+// source's minimum and maximum.  When the base is a TTL the server sent, the
+// window is also clipped at the TTL, so a refresh never waits past the time
+// the server said the content was good for.  Every interval it returns lies
+// within those bounds, whatever the configuration or the metadata a source
+// serves.
 type jitterer struct {
 	intervalBase  int64
 	intervalRange int64
 
+	fraction    float64
 	minInterval time.Duration
 	maxInterval time.Duration
-
-	// ttlBaseMultiplier is applied to a TTL to find the bottom of its jitter
-	// window.  A TTL's window sits entirely below the TTL, so that a refresh
-	// never waits past the time the server said the content was good for.
-	ttlBaseMultiplier float64
 }
 
 // newJitterer constructs a jitterer for a RefreshSource whose defaults have
@@ -38,9 +37,9 @@ func newJitterer(source RefreshSource) jitterer {
 	// in nextInterval is what keeps the result safe.
 	interval := min(source.RefreshInterval, j.maxInterval)
 
-	j.intervalBase = int64((1.0 - source.JitterFraction) * float64(interval))
-	j.intervalRange = int64((1.0+source.JitterFraction)*float64(interval)) - j.intervalBase + 1
-	j.ttlBaseMultiplier = 1.0 - (2.0 * source.JitterFraction)
+	j.fraction = source.JitterFraction
+	j.intervalBase = int64((1.0 - j.fraction) * float64(interval))
+	j.intervalRange = int64((1.0+j.fraction)*float64(interval)) - j.intervalBase + 1
 
 	return j
 }
@@ -55,10 +54,12 @@ func (j jitterer) nextInterval(ttl time.Duration, refreshErr error) (next time.D
 	} else {
 		// a TTL is advisory.  cap it before the jitter arithmetic, both so that a
 		// source cannot make us wait longer than the configured maximum and so
-		// that the arithmetic below cannot overflow.
+		// that the arithmetic below cannot overflow.  the window is the same
+		// fraction below the TTL as for a configured interval, and nothing
+		// above it.
 		ttl = min(ttl, j.maxInterval)
 
-		base := int64(j.ttlBaseMultiplier * float64(ttl))
+		base := int64((1.0 - j.fraction) * float64(ttl))
 		next = time.Duration(base) + time.Duration(rand.Int63n(positive(int64(ttl)-base+1)))
 	}
 

@@ -33,11 +33,11 @@ func TestJitterWithoutATTLStaysInsideTheWindow(t *testing.T) {
 	}
 }
 
-func TestJitterWithATTLNeverExceedsIt(t *testing.T) {
+func TestJitterWithATTLIsTheSameFractionEarlyAndNeverLate(t *testing.T) {
 	j := newJitterer(jitterSource(time.Hour, time.Minute, 24*time.Hour, 0.1))
 	for range 1000 {
 		next := j.nextInterval(30*time.Minute, nil)
-		assert.GreaterOrEqual(t, next, 24*time.Minute)
+		assert.GreaterOrEqual(t, next, 27*time.Minute)
 		assert.LessOrEqual(t, next, 30*time.Minute)
 	}
 }
