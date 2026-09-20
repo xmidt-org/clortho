@@ -9,7 +9,7 @@ import (
 )
 
 // jitterer computes the time until a source's next refresh: a random point
-// within JitterFraction either side of the base interval, clipped to the
+// within JitterPercentage either side of the base interval, clipped to the
 // source's minimum and maximum.  When the base is a TTL the server sent, the
 // window is also clipped at the TTL, so a refresh never waits past the time
 // the server said the content was good for.  Every interval it returns lies
@@ -37,7 +37,7 @@ func newJitterer(source RefreshSource) jitterer {
 	// in nextInterval is what keeps the result safe.
 	interval := min(source.RefreshInterval, j.maxInterval)
 
-	j.fraction = source.JitterFraction
+	j.fraction = source.JitterPercentage / 100.0
 	j.intervalBase = int64((1.0 - j.fraction) * float64(interval))
 	j.intervalRange = int64((1.0+j.fraction)*float64(interval)) - j.intervalBase + 1
 

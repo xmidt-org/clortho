@@ -82,7 +82,7 @@ func TestNewFillsDefaults(t *testing.T) {
 	assert.Equal(t, DefaultRefreshInterval, src.RefreshInterval)
 	assert.Equal(t, DefaultMinRefreshInterval, src.MinRefreshInterval)
 	assert.Equal(t, DefaultMaxRefreshInterval, src.MaxRefreshInterval)
-	assert.Equal(t, DefaultJitterFraction, src.JitterFraction)
+	assert.Equal(t, DefaultJitterPercentage, src.JitterPercentage)
 	assert.Equal(t, DefaultMaxResponseBytes, src.MaxResponseBytes)
 	require.NotNil(t, src.Client)
 	assert.Equal(t, DefaultHTTPTimeout, src.Client.Timeout)
@@ -97,7 +97,7 @@ func TestNewKeepsExplicitValues(t *testing.T) {
 		RefreshInterval:    time.Hour,
 		MinRefreshInterval: time.Minute,
 		MaxRefreshInterval: 2 * time.Hour,
-		JitterFraction:     0.25,
+		JitterPercentage:   25,
 		Client:             client,
 		MaxResponseBytes:   1024,
 	}}})
@@ -107,15 +107,15 @@ func TestNewKeepsExplicitValues(t *testing.T) {
 	assert.Equal(t, time.Hour, src.RefreshInterval)
 	assert.Equal(t, time.Minute, src.MinRefreshInterval)
 	assert.Equal(t, 2*time.Hour, src.MaxRefreshInterval)
-	assert.Equal(t, 0.25, src.JitterFraction)
+	assert.Equal(t, 25.0, src.JitterPercentage)
 	assert.Same(t, client, src.Client)
 	assert.Equal(t, int64(1024), src.MaxResponseBytes)
 }
 
 func TestNewReplacesAnOutOfRangeJitter(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", JitterFraction: 1.5}}})
+	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", JitterPercentage: 150}}})
 	require.NoError(t, err)
-	assert.Equal(t, DefaultJitterFraction, p.sources[0].JitterFraction)
+	assert.Equal(t, DefaultJitterPercentage, p.sources[0].JitterPercentage)
 }
 
 func TestNewRaisesAMaxBelowTheMin(t *testing.T) {

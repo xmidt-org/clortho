@@ -25,9 +25,9 @@ const (
 	// RefreshSource.MaxRefreshInterval is zero.
 	DefaultMaxRefreshInterval = 7 * 24 * time.Hour
 
-	// DefaultJitterFraction is the jitter applied when
-	// RefreshSource.JitterFraction is zero or out of range.
-	DefaultJitterFraction = 0.1
+	// DefaultJitterPercentage is the jitter applied when
+	// RefreshSource.JitterPercentage is zero or out of range.
+	DefaultJitterPercentage = 10.0
 
 	// DefaultHTTPTimeout is the timeout of the client used for an http or https
 	// source when RefreshSource.Client is nil.
@@ -79,18 +79,18 @@ type RefreshSource struct {
 	// effective MinRefreshInterval is raised to it.
 	MaxRefreshInterval time.Duration
 
-	// JitterFraction is a percentage, plus or minus, applied to every refresh
-	// interval: 0.1 means each refresh fires at a random point between ten
+	// JitterPercentage is a percentage, plus or minus, applied to every refresh
+	// interval: 10 means each refresh fires at a random point between ten
 	// percent early and ten percent late.  When the interval comes from a
 	// server TTL the late half is dropped, since the server said the content
-	// is stale after that, so 0.1 then means up to ten percent early.  The
+	// is stale after that, so 10 then means up to ten percent early.  The
 	// result is clipped to the min and max above.
 	//
-	// Valid values are at least zero and less than one; anything else,
-	// including zero, gets DefaultJitterFraction.  Jitter cannot be turned
-	// off, since its purpose is to keep a fleet that started together from
-	// polling the key server in lockstep.
-	JitterFraction float64
+	// Valid values are at least zero and less than one hundred; anything
+	// else, including zero, gets DefaultJitterPercentage.  Jitter cannot be
+	// turned off, since its purpose is to keep a fleet that started together
+	// from polling the key server in lockstep.
+	JitterPercentage float64
 
 	// Client makes the requests for an http or https URI.  It owns timeout,
 	// redirects, TLS, proxies, and any authorization its transport adds.  Nil: a
@@ -212,8 +212,8 @@ func (rs RefreshSource) withDefaults() RefreshSource {
 		rs.MaxRefreshInterval = rs.MinRefreshInterval
 	}
 
-	if rs.JitterFraction <= 0.0 || rs.JitterFraction >= 1.0 {
-		rs.JitterFraction = DefaultJitterFraction
+	if rs.JitterPercentage <= 0.0 || rs.JitterPercentage >= 100.0 {
+		rs.JitterPercentage = DefaultJitterPercentage
 	}
 
 	if rs.Client == nil {
