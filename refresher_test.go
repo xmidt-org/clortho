@@ -439,6 +439,23 @@ func (suite *RefresherSuite) TestContextDoesNotGrow() {
 	}
 }
 
+// TestMultipleSourceErrors checks that every problem with the refresh sources
+// is reported together, not just the first one found.
+func (suite *RefresherSuite) TestMultipleSourceErrors() {
+	r, err := NewRefresher(
+		WithSources(
+			RefreshSource{},
+			RefreshSource{URI: "https://example.net"},
+			RefreshSource{URI: "https://example.net"},
+		),
+	)
+
+	suite.True(r == nil, "a failed constructor must return a nil interface, got %#v", r)
+	suite.Require().Error(err)
+	suite.ErrorContains(err, "a URI is required")
+	suite.ErrorContains(err, "duplicate refresh source URI")
+}
+
 func TestRefresher(t *testing.T) {
 	suite.Run(t, new(RefresherSuite))
 }

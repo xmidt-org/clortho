@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/jtacoma/uritemplates"
-	"go.uber.org/multierr"
 )
 
 const (
@@ -96,7 +95,7 @@ type Resolver interface {
 // fails with ErrNoTemplate rather than an attempted fetch.
 func NewResolver(options ...ResolverOption) (Resolver, error) {
 	var (
-		err error
+		errs []error
 
 		r = &resolver{
 			pending: pendingResolverRequests{},
@@ -104,7 +103,7 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 	)
 
 	for _, o := range options {
-		err = multierr.Append(err, o.applyToResolver(r))
+		errs = append(errs, o.applyToResolver(r))
 	}
 
 	if r.fetcher == nil {
@@ -112,10 +111,10 @@ func NewResolver(options ...ResolverOption) (Resolver, error) {
 	}
 
 	if r.keyIDExpander == nil {
-		err = multierr.Append(err, ErrNoTemplate)
+		errs = append(errs, ErrNoTemplate)
 	}
 
-	if err != nil {
+	if err := errors.Join(errs...); err != nil {
 		// NOTE: an explicit nil, not a nil *resolver, so that a caller comparing the
 		// returned interface against nil sees what it expects.
 		return nil, err

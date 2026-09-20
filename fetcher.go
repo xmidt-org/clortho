@@ -7,8 +7,7 @@ import (
 	"context"
 	"crypto"
 	_ "crypto/sha256"
-
-	"go.uber.org/multierr"
+	"errors"
 )
 
 // Fetcher handles fetching keys from URI locations.  This is the typical application-layer interface.
@@ -52,15 +51,15 @@ func (f *fetcher) Fetch(ctx context.Context, location string) ([]Key, ContentMet
 		return nil, ContentMeta{}, err
 	}
 
-	var errs error
+	var errs []error
 	for i, k := range keys {
 		updated, hashErr := EnsureKeyID(k, f.keyIDHash)
 		keys[i] = updated
-		errs = multierr.Append(errs, hashErr)
+		errs = append(errs, hashErr)
 	}
 
-	if errs != nil {
-		return nil, ContentMeta{}, errs
+	if err := errors.Join(errs...); err != nil {
+		return nil, ContentMeta{}, err
 	}
 
 	return keys, nextMeta, nil

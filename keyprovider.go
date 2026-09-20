@@ -10,7 +10,6 @@ import (
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/lestrrat-go/jwx/v4/jws"
-	"go.uber.org/multierr"
 )
 
 var (
@@ -65,19 +64,19 @@ var (
 func NewKeyProvider(opts ...KeyProviderOption) (jws.KeyProvider, error) {
 	kp := keyProvider{}
 
-	var errs error
+	var errs []error
 	for _, opt := range opts {
-		errs = multierr.Append(errs, opt.apply(&kp))
+		errs = append(errs, opt.apply(&kp))
 	}
 
 	if kp.keyRing == nil {
-		errs = multierr.Append(errs, ErrKeyProviderNoKeyRing)
+		errs = append(errs, ErrKeyProviderNoKeyRing)
 	}
 
-	if errs != nil {
+	if err := errors.Join(errs...); err != nil {
 		// NOTE: an explicit nil, not a nil *keyProvider, so that a caller comparing the
 		// returned interface against nil sees what it expects.
-		return nil, errs
+		return nil, err
 	}
 
 	return &kp, nil

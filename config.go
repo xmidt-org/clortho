@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"go.uber.org/multierr"
 )
 
 const (
@@ -66,20 +64,21 @@ func (rs RefreshSource) validate() (err error) {
 }
 
 // validateRefreshSources validates a sequence of sources.
-func validateRefreshSources(in ...RefreshSource) (err error) {
+func validateRefreshSources(in ...RefreshSource) error {
+	var errs []error
 	duplicates := make(map[string]RefreshSource, len(in))
 	for _, s := range in {
-		err = multierr.Append(err, s.validate())
+		errs = append(errs, s.validate())
 
 		if _, ok := duplicates[s.URI]; ok {
-			err = multierr.Append(err, fmt.Errorf("duplicate refresh source URI: '%s'", s.URI))
+			errs = append(errs, fmt.Errorf("duplicate refresh source URI: '%s'", s.URI))
 			continue
 		}
 
 		duplicates[s.URI] = s
 	}
 
-	return
+	return errors.Join(errs...)
 }
 
 // ResolveConfig configures how to fetch individual keys on demand.  It is used by

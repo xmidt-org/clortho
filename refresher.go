@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/xmidt-org/chronon"
-	"go.uber.org/multierr"
 )
 
 var (
@@ -86,21 +85,21 @@ type Refresher interface {
 // a default Loader and Parser are created and used.  Whenever the returned error is
 // non-nil, the returned Refresher is nil.
 func NewRefresher(options ...RefresherOption) (Refresher, error) {
-	var err error
+	errs := make([]error, 0, len(options)+1)
 	r := &refresher{
 		clock: chronon.SystemClock(),
 	}
 
 	for _, o := range options {
-		err = multierr.Append(err, o.applyToRefresher(r))
+		errs = append(errs, o.applyToRefresher(r))
 	}
 
 	if r.fetcher == nil {
 		r.fetcher = NewFetcher()
 	}
 
-	err = multierr.Append(err, validateRefreshSources(r.sources...))
-	if err != nil {
+	errs = append(errs, validateRefreshSources(r.sources...))
+	if err := errors.Join(errs...); err != nil {
 		// NOTE: an explicit nil, not a nil *refresher, so that a caller comparing the
 		// returned interface against nil sees what it expects.
 		return nil, err

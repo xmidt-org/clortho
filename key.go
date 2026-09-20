@@ -8,9 +8,9 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"encoding/base64"
+	"errors"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
-	"go.uber.org/multierr"
 )
 
 // Thumbprinter is implemented by anything that can produce a secure thumbprint of itself.
@@ -131,15 +131,15 @@ func appendJWKKey(jk jwk.Key, keys []Key) ([]Key, error) {
 }
 
 func appendJWKSet(js jwk.Set, keys []Key) ([]Key, error) {
-	var err error
+	var errs []error
 	for i := 0; i < js.Len(); i++ {
 		jk, _ := js.Key(i)
 		var keyErr error
 		keys, keyErr = appendJWKKey(jk, keys)
-		err = multierr.Append(err, keyErr)
+		errs = append(errs, keyErr)
 	}
 
-	return keys, err
+	return keys, errors.Join(errs...)
 }
 
 // EnsureKeyID conditionally assigns a key ID to a given key.  The updated

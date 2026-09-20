@@ -4,11 +4,11 @@
 package clortho
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
-	"go.uber.org/multierr"
 )
 
 // UnsupportedFormatError indicates that a Parser cannot parse a given format.
@@ -79,12 +79,12 @@ func (ps *parsers) Parse(format string, content []byte) (keys []Key, err error) 
 func NewParser(options ...ParserOption) (Parser, error) {
 	ps := defaultParser()
 
-	var errs error
+	errs := make([]error, 0, len(options))
 	for _, o := range options {
-		errs = multierr.Append(errs, o.applyToParsers(ps))
+		errs = append(errs, o.applyToParsers(ps))
 	}
 
-	return ps, errs
+	return ps, errors.Join(errs...)
 }
 
 func defaultParser() *parsers {

@@ -4,8 +4,9 @@
 package clorthozap
 
 import (
+	"errors"
+
 	"github.com/xmidt-org/clortho"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -59,15 +60,16 @@ func NewListener(options ...ListenerOption) (l *Listener, err error) {
 		level: zap.InfoLevel,
 	}
 
+	errs := make([]error, 0, len(options))
 	for _, o := range options {
-		err = multierr.Append(err, o.applyToListener(l))
+		errs = append(errs, o.applyToListener(l))
 	}
 
 	if l.logger == nil {
 		l.logger = zap.L()
 	}
 
-	if err != nil {
+	if err = errors.Join(errs...); err != nil {
 		l = nil
 	}
 
