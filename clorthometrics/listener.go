@@ -4,10 +4,11 @@
 package clorthometrics
 
 import (
+	"errors"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/xmidt-org/clortho"
 	"github.com/xmidt-org/touchstone"
-	"go.uber.org/multierr"
 )
 
 // ListenerOption is a configurable option passed to NewListener that
@@ -24,24 +25,28 @@ func (lof listenerOptionFunc) applyToListener(l *Listener) error {
 
 // WithFactory populates a listener with metrics created via the given factory.
 func WithFactory(f *touchstone.Factory) ListenerOption {
-	return listenerOptionFunc(func(l *Listener) (err error) {
-		var metricErr error
+	return listenerOptionFunc(func(l *Listener) error {
+		var (
+			errs      = make([]error, 0, 5)
+			metricErr error
+		)
+
 		l.refreshTotal, metricErr = newRefreshTotal(f)
-		err = multierr.Append(err, metricErr)
+		errs = append(errs, metricErr)
 
 		l.refreshKeys, metricErr = newRefreshKeys(f)
-		err = multierr.Append(err, metricErr)
+		errs = append(errs, metricErr)
 
 		l.refreshErrorTotal, metricErr = newRefreshErrorTotal(f)
-		err = multierr.Append(err, metricErr)
+		errs = append(errs, metricErr)
 
 		l.resolveTotal, metricErr = newResolveTotal(f)
-		err = multierr.Append(err, metricErr)
+		errs = append(errs, metricErr)
 
 		l.resolveErrorTotal, metricErr = newResolveErrorTotal(f)
-		err = multierr.Append(err, metricErr)
+		errs = append(errs, metricErr)
 
-		return
+		return errors.Join(errs...)
 	})
 }
 

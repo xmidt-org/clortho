@@ -5,6 +5,7 @@ package clortho
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,8 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"go.uber.org/multierr"
 )
 
 // UnsupportedSchemeError indicates that a URI's scheme was not registered
@@ -99,12 +98,12 @@ type Loader interface {
 func NewLoader(options ...LoaderOption) (Loader, error) {
 	ls := defaultLoader()
 
-	var errs error
+	errs := make([]error, 0, len(options))
 	for _, o := range options {
-		errs = multierr.Append(errs, o.applyToLoaders(ls))
+		errs = append(errs, o.applyToLoaders(ls))
 	}
 
-	return ls, errs
+	return ls, errors.Join(errs...)
 }
 
 func defaultLoader() *loaders {

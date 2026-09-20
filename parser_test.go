@@ -366,6 +366,21 @@ func (suite *ParserSuite) TestMIMEParameters() {
 	suite.Contains(ife.Error(), formatWithParameters)
 }
 
+// TestMultipleInvalidFormats checks that every invalid format is reported, not
+// just the first one found.
+func (suite *ParserSuite) TestMultipleInvalidFormats() {
+	_, err := NewParser(
+		WithFormats(new(mockParser), "text/plain;charset=utf-8", "ok", "application/json;q=1"),
+	)
+
+	suite.Require().Error(err)
+
+	var ife InvalidFormatError
+	suite.ErrorAs(err, &ife)
+	suite.ErrorContains(err, "text/plain;charset=utf-8")
+	suite.ErrorContains(err, "application/json;q=1")
+}
+
 func TestParser(t *testing.T) {
 	suite.Run(t, new(ParserSuite))
 }
