@@ -106,6 +106,25 @@ type HTTPClient interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
+// ErrNilHTTPClient is returned by NewLoader when WithHTTPClient is given a nil client.
+var ErrNilHTTPClient = errors.New("WithHTTPClient requires a non-nil client")
+
+// newDefaultHTTPClient returns the client an HTTPLoader uses when none is set.
+// It does not follow redirects.  A redirect lets the server, rather than the
+// configured location, decide where key material comes from, so the redirect
+// response is handed back as is and surfaces as an HTTPLoaderError with its
+// 3xx status.  The client shares the process's default transport, so
+// connection pooling is unaffected; only the redirect policy differs from
+// http.DefaultClient, along with not being a global that other packages can
+// alter.
+func newDefaultHTTPClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 // HTTPEncoder is a strategy closure type for modifying an HTTP request
 // prior to issuing it through a client.
 type HTTPEncoder func(context.Context, *http.Request) error
@@ -124,7 +143,8 @@ type Loader interface {
 // NewLoader builds a Loader from a set of options.
 //
 // By default, the returned Loader handles http, https, and file locations.  The default
-// loader, when there is no scheme, is a file loader.
+// loader, when there is no scheme, is a file loader.  The http and https loaders do not
+// follow redirects; see WithHTTPClient to supply a client that does.
 func NewLoader(options ...LoaderOption) (Loader, error) {
 	ls := defaultLoader()
 
@@ -138,7 +158,7 @@ func NewLoader(options ...LoaderOption) (Loader, error) {
 
 func defaultLoader() *loaders {
 	hl := HTTPLoader{
-		Client:       http.DefaultClient,
+		Client:       newDefaultHTTPClient(),
 		MaxReadLimit: int64(1 * 1024 * 25),
 		Timeout:      30 * time.Second,
 	}
@@ -181,8 +201,10 @@ func (ls *loaders) LoadContent(ctx context.Context, location string) ([]byte, Co
 
 // HTTPLoader is a Loader strategy for obtaining content from HTTP servers.
 type HTTPLoader struct {
-	// Client is the HTTP client used to transact with HTTP servers.
-	// If unset, http.DefaultClient is used.
+	// Client is the HTTP client used to transact with HTTP servers.  If unset, a
+	// client that does not follow redirects is used.  To follow redirects, supply
+	// an *http.Client with a CheckRedirect of your own, or a plain &http.Client{}
+	// for the net/http default of up to ten.
 	Client HTTPClient
 
 	// Encoders holds an optional slice of HTTPEncoder instances that are used
@@ -207,6 +229,15 @@ func (hl *HTTPLoader) readLimit() int64 {
 	}
 
 	return math.MaxInt64 - 1
+}
+
+// client returns the configured client, or the no-redirect default when none was set.
+func (hl *HTTPLoader) client() HTTPClient {
+	if hl.Client != nil {
+		return hl.Client
+	}
+
+	return newDefaultHTTPClient()
 }
 
 func (hl *HTTPLoader) newContext(parentCtx context.Context) (context.Context, context.CancelFunc) {
@@ -258,7 +289,7 @@ func (hl *HTTPLoader) newRequest(ctx context.Context, location string) (*http.Re
 }
 
 func (hl *HTTPLoader) transact(req *http.Request) (*http.Response, []byte, error) {
-	resp, err := hl.Client.Do(req)
+	resp, err := hl.client().Do(req)
 	if err != nil {
 		return nil, nil, err
 	}

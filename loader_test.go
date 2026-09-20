@@ -15,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1000,6 +1001,110 @@ func (suite *LoaderSuite) TestHTTPNilContext() {
 	_, _, err := l.LoadContent(nil, "http://user:hunter2@example.com/keys") //nolint:gosec // test fixture, not a credential
 	suite.Require().Error(err)
 	suite.NotContains(err.Error(), "hunter2")
+}
+
+// newRedirectServers returns a server whose every request redirects to a second
+// server that serves key content, along with a counter of the requests the
+// second server received.  A loader that follows the redirect lands there.
+func (suite *LoaderSuite) newRedirectServers() (from *httptest.Server, hits *int32) {
+	hits = new(int32)
+	to := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(hits, 1)
+		rw.Header().Set("Content-Type", MediaTypeJWK)
+		_, _ = rw.Write([]byte(keyContent))
+	}))
+	suite.T().Cleanup(to.Close)
+
+	from = httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		http.Redirect(rw, r, to.URL+"/keys", http.StatusFound)
+	}))
+	suite.T().Cleanup(from.Close)
+
+	return from, hits
+}
+
+// TestHTTPRedirectNotFollowedByDefault checks that the default loader does not
+// follow a redirect.  A redirect lets the server, rather than the configured
+// location, choose where key material comes from; the redirect is reported as
+// the status error it is, and the target is never contacted.
+func (suite *LoaderSuite) TestHTTPRedirectNotFollowedByDefault() {
+	from, hits := suite.newRedirectServers()
+
+	data, meta, err := suite.newLoader().LoadContent(context.Background(), from.URL+"/keys")
+	suite.Nil(data)
+	suite.Equal(ContentMeta{}, meta)
+	suite.Require().Error(err)
+
+	var hle *HTTPLoaderError
+	suite.Require().ErrorAs(err, &hle)
+	suite.Equal(http.StatusFound, hle.StatusCode)
+	suite.Zero(atomic.LoadInt32(hits), "the redirect target must never be contacted")
+}
+
+// TestWithHTTPClientFollowsRedirects checks that a caller who wants redirects
+// followed can supply a client that does so, and that only the client changes:
+// the loader's read limit still applies.
+func (suite *LoaderSuite) TestWithHTTPClientFollowsRedirects() {
+	from, hits := suite.newRedirectServers()
+	l := suite.newLoader(WithHTTPClient(&http.Client{}))
+
+	data, _, err := l.LoadContent(context.Background(), from.URL+"/keys")
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(data))
+	suite.Equal(int32(1), atomic.LoadInt32(hits))
+
+	// the default read limit survived the client swap
+	big := suite.newSizedServer(strings.Repeat("x", 1024*25+1))
+	defer big.Close()
+	_, _, err = l.LoadContent(context.Background(), big.URL+"/keys")
+	var rtle *ResponseTooLargeError
+	suite.Require().ErrorAs(err, &rtle)
+}
+
+// TestWithHTTPClientNil checks that a nil client is rejected at construction
+// rather than discovered on the first fetch.
+func (suite *LoaderSuite) TestWithHTTPClientNil() {
+	_, err := NewLoader(WithHTTPClient(nil))
+	suite.Require().Error(err)
+	suite.ErrorIs(err, ErrNilHTTPClient)
+}
+
+// TestHTTPLoaderZeroValue checks that an HTTPLoader constructed without a Client,
+// as its doc says is allowed, works and gets the same no-redirect default.
+func (suite *LoaderSuite) TestHTTPLoaderZeroValue() {
+	server := suite.newSizedServer(keyContent)
+	defer server.Close()
+
+	var hl HTTPLoader
+	suite.Require().NotPanics(func() {
+		data, _, err := hl.LoadContent(context.Background(), server.URL+"/keys")
+		suite.Require().NoError(err)
+		suite.Equal(keyContent, string(data))
+	})
+
+	from, hits := suite.newRedirectServers()
+	_, _, err := hl.LoadContent(context.Background(), from.URL+"/keys")
+	var hle *HTTPLoaderError
+	suite.Require().ErrorAs(err, &hle)
+	suite.Equal(http.StatusFound, hle.StatusCode)
+	suite.Zero(atomic.LoadInt32(hits))
+}
+
+// TestWithHTTPClientCustomScheme checks that the option reaches an HTTPLoader a
+// caller registered under its own scheme, by pointer, not only the defaults.
+func (suite *LoaderSuite) TestWithHTTPClientCustomScheme() {
+	from, hits := suite.newRedirectServers()
+	custom := &HTTPLoader{}
+	l := suite.newLoader(
+		WithSchemes(custom, "http"),
+		WithHTTPClient(&http.Client{}),
+	)
+
+	data, _, err := l.LoadContent(context.Background(), from.URL+"/keys")
+	suite.Require().NoError(err)
+	suite.Equal(keyContent, string(data))
+	suite.Equal(int32(1), atomic.LoadInt32(hits))
+	suite.NotNil(custom.Client, "the registered loader itself must carry the client")
 }
 
 func TestLoader(t *testing.T) {

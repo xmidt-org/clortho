@@ -50,6 +50,37 @@ func WithSchemes(l Loader, schemes ...string) LoaderOption {
 	})
 }
 
+// WithHTTPClient replaces the HTTP client of every HTTPLoader registered with
+// the Loader so far, which by default are the loaders for http and https.  The
+// loaders' other settings, such as the timeout and read limit, are kept.  A nil
+// client is rejected with ErrNilHTTPClient.
+//
+// The default client does not follow redirects.  A deployment whose key server
+// redirects can pass an *http.Client with a CheckRedirect of its own, or a plain
+// &http.Client{} for the net/http default of up to ten redirects.  Choose
+// deliberately: a followed redirect lets the server, not the configured
+// location, decide where key material comes from.
+func WithHTTPClient(c HTTPClient) LoaderOption {
+	return loaderOptionFunc(func(ls *loaders) error {
+		if c == nil {
+			return ErrNilHTTPClient
+		}
+
+		for scheme, l := range ls.l {
+			switch hl := l.(type) {
+			case HTTPLoader:
+				hl.Client = c
+				ls.l[scheme] = hl
+
+			case *HTTPLoader:
+				hl.Client = c
+			}
+		}
+
+		return nil
+	})
+}
+
 // ParserOption allows tailoring of the Parser returned by NewParser.
 type ParserOption interface {
 	applyToParsers(*parsers) error

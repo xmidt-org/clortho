@@ -24,9 +24,9 @@
 // consulted during verification.
 //
 // Loaders and Parsers sit underneath both.  The default Loader handles http,
-// https, and file URIs as well as plain file system paths, and the default
-// Parser handles JWK, JWK sets, and PEM.  Both accept options for custom schemes
-// and formats.
+// https, and file URIs as well as plain file system paths, and does not follow
+// HTTP redirects; the default Parser handles JWK, JWK sets, and PEM.  Both
+// accept options for custom schemes and formats.
 //
 // NewKeyProvider, NewResolver, and NewRefresher return a nil value alongside a
 // non-nil error.  Errors from the key provider carry sentinels such as
