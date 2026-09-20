@@ -326,12 +326,3 @@ func WithEnforceKeyUsage() KeyProviderOption {
 		return nil
 	})
 }
-
-// WithRingKey associates a KeyRing with a jws.KeyProvider.
-//
-// Deprecated: the name is backwards; it takes a KeyRing.  Use WithKeyRing, which
-// accepts the same argument and is also a ResolverOption.  This alias will be
-// removed in a future release.
-func WithRingKey(kr KeyRing) KeyProviderOption {
-	return WithKeyRing(kr)
-}
