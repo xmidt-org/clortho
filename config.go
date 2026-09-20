@@ -55,8 +55,9 @@ type RefreshSource struct {
 	// this often.  This bounds how long a source can make the refresher wait by serving a
 	// large max-age, so that rotated or revoked keys are not trusted indefinitely.
 	//
-	// If this value is not positive, the larger of DefaultRefreshMaxInterval and the
-	// effective Interval is used, so a deliberately long Interval is never cut short by
+	// If this value is not positive, the larger of DefaultRefreshMaxInterval and the top
+	// of the jitter window around the effective Interval, (1+Jitter)*Interval, is used, so
+	// a deliberately long Interval keeps its full spread rather than being cut short by
 	// the default.  If it is less than the effective MinInterval, MinInterval is used,
 	// since that is the hard floor.
 	MaxInterval time.Duration `json:"maxInterval" yaml:"maxInterval"`
