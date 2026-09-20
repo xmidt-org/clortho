@@ -143,7 +143,7 @@ func (r *refresher) Start(_ context.Context) error {
 			}
 		)
 
-		go task.run(SetContentMeta(taskCtx, ContentMeta{}))
+		go task.run(taskCtx)
 		tasks = append(tasks, task)
 	}
 
@@ -214,20 +214,27 @@ func (rt *refreshTask) findChanges(next, prev map[string]Key) (newKeys, deletedK
 	return
 }
 
+// run is the refresh loop for a single source.  It returns when ctx is canceled.
+//
+// Each cycle's context is derived from ctx, never from the previous cycle's
+// context.  The ContentMeta from the last successful fetch is carried in a local
+// and layered onto ctx fresh each time, so the context handed to the Fetcher
+// stays one value deep for the life of the loop.
 func (rt *refreshTask) run(ctx context.Context) {
 	var (
 		prevKeys   []Key
 		prevKeyMap map[string]Key
+		prevMeta   ContentMeta
 	)
 
 	for {
 		event := RefreshEvent{URI: rt.source.URI}
-		nextKeys, meta, err := rt.fetcher.Fetch(ctx, rt.source.URI)
+		nextKeys, meta, err := rt.fetcher.Fetch(SetContentMeta(ctx, prevMeta), rt.source.URI)
 		next := rt.jitterer.nextInterval(ContentMeta{}, err)
 		if err == nil {
 			nextKeyMap := rt.newKeyMap(nextKeys)
 			event.New, event.Deleted = rt.findChanges(nextKeyMap, prevKeyMap)
-			ctx = SetContentMeta(ctx, meta)
+			prevMeta = meta
 			next = rt.jitterer.nextInterval(meta, nil)
 
 			// send out the next keys
