@@ -158,13 +158,39 @@ func WithKeyIDTemplate(t string) ResolverOption {
 	})
 }
 
-// WithKeyRing sets a KeyRing to act as a cache for the Resolver.
-// By default, a Resolver is not associated with any KeyRing.
-func WithKeyRing(kr KeyRing) ResolverOption {
-	return resolverOptionFunc(func(r *resolver) error {
-		r.keyRing = kr
-		return nil
-	})
+// KeyRingOption is the return type of WithKeyRing, and nothing more.  It is an
+// interface embedding both option types so that the one value can be passed to
+// NewResolver or NewKeyProvider; see ConfigOption for the same pattern.
+type KeyRingOption interface {
+	ResolverOption
+	KeyProviderOption
+}
+
+type keyRingOption struct {
+	kr KeyRing
+}
+
+func (kro keyRingOption) applyToResolver(r *resolver) error {
+	r.keyRing = kro.kr
+	return nil
+}
+
+func (kro keyRingOption) apply(kp *keyProvider) error {
+	kp.keyRing = kro.kr
+	return nil
+}
+
+// WithKeyRing associates a KeyRing with a Resolver or a jws.KeyProvider.
+//
+// For a Resolver, the ring acts as a cache: keys found on it are returned
+// without a fetch, and fetched keys are added to it.  By default, a Resolver
+// has no ring.
+//
+// For a jws.KeyProvider, the ring is the only source of keys, and is required.
+func WithKeyRing(kr KeyRing) KeyRingOption {
+	return keyRingOption{
+		kr: kr,
+	}
 }
 
 // RefresherOption is a configurable option passed to NewRefresher.
@@ -277,10 +303,11 @@ type keyProviderOptionFunc func(*keyProvider) error
 
 func (kpof keyProviderOptionFunc) apply(kp *keyProvider) error { return kpof(kp) }
 
+// WithRingKey associates a KeyRing with a jws.KeyProvider.
+//
+// Deprecated: the name is backwards; it takes a KeyRing.  Use WithKeyRing, which
+// accepts the same argument and is also a ResolverOption.  This alias will be
+// removed in a future release.
 func WithRingKey(kr KeyRing) KeyProviderOption {
-	return keyProviderOptionFunc(func(kp *keyProvider) error {
-		kp.keyRing = kr
-
-		return nil
-	})
+	return WithKeyRing(kr)
 }

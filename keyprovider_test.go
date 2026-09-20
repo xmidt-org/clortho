@@ -86,7 +86,7 @@ func (suite *KeyProviderSuite) newRing(kid string, raw any) KeyRing {
 
 // newKeyProvider returns a provider over a ring holding raw under kid.
 func (suite *KeyProviderSuite) newKeyProvider(kid string, raw any) jws.KeyProvider {
-	kp, err := NewKeyProvider(WithRingKey(suite.newRing(kid, raw)))
+	kp, err := NewKeyProvider(WithKeyRing(suite.newRing(kid, raw)))
 	suite.Require().NoError(err)
 	suite.Require().NotNil(kp)
 	return kp
@@ -132,7 +132,7 @@ func (suite *KeyProviderSuite) TestNoOptions() {
 }
 
 func (suite *KeyProviderSuite) TestNilKeyRing() {
-	kp, err := NewKeyProvider(WithRingKey(nil))
+	kp, err := NewKeyProvider(WithKeyRing(nil))
 
 	suite.Nil(kp)
 	suite.Require().Error(err)
@@ -145,7 +145,7 @@ func (suite *KeyProviderSuite) TestOptionError() {
 		return expectedErr
 	})
 
-	kp, err := NewKeyProvider(failingOption, WithRingKey(NewKeyRing()))
+	kp, err := NewKeyProvider(failingOption, WithKeyRing(NewKeyRing()))
 
 	suite.Nil(kp)
 	suite.Require().Error(err)
@@ -170,7 +170,7 @@ func (suite *KeyProviderSuite) TestOptionErrorAndNoKeyRing() {
 
 // TestEmptyKeyRing pins the empty-ring versus no-ring distinction.
 func (suite *KeyProviderSuite) TestEmptyKeyRing() {
-	kp, err := NewKeyProvider(WithRingKey(NewKeyRing()))
+	kp, err := NewKeyProvider(WithKeyRing(NewKeyRing()))
 
 	suite.Require().NoError(err)
 	suite.Require().NotNil(kp)
@@ -191,7 +191,7 @@ func (suite *KeyProviderSuite) TestZeroValueProvider() {
 }
 
 func (suite *KeyProviderSuite) TestVerifySuccess() {
-	kp, err := NewKeyProvider(WithRingKey(suite.newRingWith("kid-1")))
+	kp, err := NewKeyProvider(WithKeyRing(suite.newRingWith("kid-1")))
 
 	suite.Require().NoError(err)
 	suite.Require().NotNil(kp)
@@ -202,7 +202,7 @@ func (suite *KeyProviderSuite) TestVerifySuccess() {
 }
 
 func (suite *KeyProviderSuite) TestMissingKeyID() {
-	kp, err := NewKeyProvider(WithRingKey(suite.newRingWith("kid-1")))
+	kp, err := NewKeyProvider(WithKeyRing(suite.newRingWith("kid-1")))
 	suite.Require().NoError(err)
 
 	unsigned, err := jws.Sign(
@@ -452,7 +452,7 @@ func (suite *KeyProviderSuite) TestVerifySuccessByKeyType() {
 // found" while its configuration looked correct.
 func (suite *KeyProviderSuite) TestNoRefreshSources() {
 	kp, err := NewKeyProvider(
-		WithRingKey(NewKeyRing()),
+		WithKeyRing(NewKeyRing()),
 		WithConfig(Config{
 			Resolve: ResolveConfig{Template: "https://example.com/keys/{keyID}"},
 		}),
@@ -468,7 +468,7 @@ func (suite *KeyProviderSuite) TestNoRefreshSources() {
 // is accepted, and that the provider still verifies from its ring.
 func (suite *KeyProviderSuite) TestWithRefreshSources() {
 	kp, err := NewKeyProvider(
-		WithRingKey(suite.newRingWith("kid-1")),
+		WithKeyRing(suite.newRingWith("kid-1")),
 		WithConfig(Config{
 			Refresh: RefreshConfig{
 				Sources: []RefreshSource{{URI: "https://example.com/keys"}},
@@ -476,6 +476,18 @@ func (suite *KeyProviderSuite) TestWithRefreshSources() {
 		}),
 	)
 
+	suite.Require().NoError(err)
+	suite.Require().NotNil(kp)
+
+	payload, err := jws.Verify(suite.newSignedJWS("kid-1"), jws.WithKeyProvider(kp))
+	suite.Require().NoError(err)
+	suite.JSONEq(`{"sub":"test"}`, string(payload))
+}
+
+// TestDeprecatedWithRingKey pins the deprecated alias: it must keep working
+// exactly like WithKeyRing until it is removed.
+func (suite *KeyProviderSuite) TestDeprecatedWithRingKey() {
+	kp, err := NewKeyProvider(WithRingKey(suite.newRingWith("kid-1"))) //nolint:staticcheck // deliberately exercising the alias
 	suite.Require().NoError(err)
 	suite.Require().NotNil(kp)
 
