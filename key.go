@@ -66,31 +66,55 @@ type key struct {
 	keyIDGenerated bool
 }
 
+// keyIDOverride gives a Key implementation other than this package's own a
+// different key ID, leaving everything else to the wrapped Key.  It is how
+// EnsureKeyID assigns a thumbprint to a custom Parser's key, and how a Resolver
+// adopts such a key under a requested kid, without knowing the key's type.
+type keyIDOverride struct {
+	Key
+	keyID     string
+	generated bool
+}
+
+func (ko keyIDOverride) KeyID() string { return ko.keyID }
+
 // keyIDGenerated reports whether k's key ID was assigned by EnsureKeyID.  For a
-// Key implementation other than this package's own, the answer is false: its kid
-// is taken to be authoritative.
+// Key implementation this package has never touched, the answer is false: its
+// kid is taken to be authoritative.
 func keyIDGenerated(k Key) bool {
-	if kk, ok := k.(*key); ok {
+	switch kk := k.(type) {
+	case *key:
 		return kk.keyIDGenerated
+
+	case keyIDOverride:
+		return kk.generated
 	}
 
 	return false
 }
 
 // withKeyID returns a copy of k carrying the given key ID, marked as not
-// generated.  It is only meaningful for this package's own Key implementation;
-// any other Key is returned as is.
+// generated.  This package's own keys are cloned; any other Key is wrapped.
 func withKeyID(k Key, keyID string) Key {
-	kk, ok := k.(*key)
-	if !ok {
-		return k
+	return replaceKeyID(k, keyID, false)
+}
+
+// replaceKeyID is withKeyID with control over the generated marker.
+func replaceKeyID(k Key, keyID string, generated bool) Key {
+	switch kk := k.(type) {
+	case *key:
+		clone := new(key)
+		*clone = *kk
+		clone.keyID = keyID
+		clone.keyIDGenerated = generated
+		return clone
+
+	case keyIDOverride:
+		// re-wrap the original rather than nesting wrappers
+		return keyIDOverride{Key: kk.Key, keyID: keyID, generated: generated}
 	}
 
-	clone := new(key)
-	*clone = *kk
-	clone.keyID = keyID
-	clone.keyIDGenerated = false
-	return clone
+	return keyIDOverride{Key: k, keyID: keyID, generated: generated}
 }
 
 func (k *key) KeyID() string            { return k.keyID }
@@ -182,6 +206,11 @@ func appendJWKSet(js jwk.Set, keys []Key) ([]Key, error) {
 // If k does not have a key ID, a thumbprint is generated using the supplied
 // hash.  The returned key will be a copy of k with the newly generated key ID,
 // and it remembers that the key ID was generated, which a Resolver relies on.
+// A Key implementation other than this package's own is wrapped rather than
+// copied; everything but its key ID is still served by the original, but the
+// returned value is the wrapper, so a type assertion to the original's type
+// will not succeed on it.  A custom Key that already has a key ID is never
+// wrapped.
 // If an error occurred, then k is returned as is.
 func EnsureKeyID(k Key, h crypto.Hash) (updated Key, err error) {
 	updated = k
@@ -190,11 +219,7 @@ func EnsureKeyID(k Key, h crypto.Hash) (updated Key, err error) {
 		t, err = k.Thumbprint(h)
 
 		if err == nil {
-			clone := new(key)
-			*clone = *(k.(*key))
-			clone.keyID = base64.RawURLEncoding.EncodeToString(t)
-			clone.keyIDGenerated = true
-			updated = clone
+			updated = replaceKeyID(k, base64.RawURLEncoding.EncodeToString(t), true)
 		}
 	}
 

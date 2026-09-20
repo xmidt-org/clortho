@@ -5,6 +5,7 @@ package clortho
 
 import (
 	"crypto"
+	"encoding/base64"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -103,6 +104,53 @@ func (suite *KeysSuite) TestEnsureKeyIDMarksGenerated() {
 	suite.Require().NoError(err)
 	suite.Same(withKid, same)
 	suite.False(keyIDGenerated(same), "a kid from the source must not be marked as generated")
+}
+
+// customKey is the smallest Key implementation a custom Parser could return:
+// no kid, and a fixed thumbprint.
+type customKey struct {
+	raw any
+}
+
+func (customKey) KeyID() string                          { return "" }
+func (customKey) KeyType() string                        { return "custom" }
+func (customKey) KeyUsage() string                       { return "" }
+func (ck customKey) Raw() any                            { return ck.raw }
+func (customKey) Public() crypto.PublicKey               { return nil }
+func (customKey) Thumbprint(crypto.Hash) ([]byte, error) { return []byte("thumbprint"), nil }
+
+// TestEnsureKeyIDCustomKey checks that a Key implementation other than the
+// package's own is given a kid rather than crashing the process.  From the
+// fetcher this runs inside the refresh goroutine, where a panic is unrecovered.
+func (suite *KeysSuite) TestEnsureKeyIDCustomKey() {
+	original := customKey{raw: "material"}
+	suite.False(keyIDGenerated(original), "a key this package never touched has no generated kid")
+
+	var (
+		updated Key
+		err     error
+	)
+
+	suite.Require().NotPanics(func() {
+		updated, err = EnsureKeyID(original, crypto.SHA256)
+	})
+
+	suite.Require().NoError(err)
+	suite.Equal(base64.RawURLEncoding.EncodeToString([]byte("thumbprint")), updated.KeyID())
+	suite.True(keyIDGenerated(updated), "the thumbprint kid must be marked as generated")
+
+	// everything but the kid still comes from the original
+	suite.Equal("custom", updated.KeyType())
+	suite.Equal("material", updated.Raw())
+
+	// and a custom key that already has a kid is returned as is
+	withKid := withKeyID(original, "kid-1")
+	suite.Equal("kid-1", withKid.KeyID())
+	suite.False(keyIDGenerated(withKid))
+
+	same, err := EnsureKeyID(withKid, crypto.SHA256)
+	suite.Require().NoError(err)
+	suite.Equal(withKid, same)
 }
 
 func TestKeys(t *testing.T) {

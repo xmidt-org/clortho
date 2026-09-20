@@ -1329,6 +1329,40 @@ func (suite *ResolverSuite) TestUnsafeTemplateRedactsCredentials() {
 	}
 }
 
+// TestSingleKeyWithoutKidAdoptedCustomKey is TestSingleKeyWithoutKidAdopted for
+// a Key implementation other than the package's own: the generated-kid marker
+// and the adoption under the requested kid must work for it too, or a custom
+// parser's kid-less key would be refused as a mismatch.
+func (suite *ResolverSuite) TestSingleKeyWithoutKidAdoptedCustomKey() {
+	var (
+		f    = new(mockFetcher)
+		ring = NewKeyRing()
+		r    = suite.newResolver(
+			WithFetcher(f),
+			WithKeyRing(ring),
+			WithKeyIDTemplate(testKeyIDURL),
+		)
+	)
+
+	fetched, err := EnsureKeyID(customKey{raw: "material"}, crypto.SHA256)
+	suite.Require().NoError(err)
+
+	f.ExpectFetch(context.Background(), "https://example.com/requested").
+		Return([]Key{fetched}, ContentMeta{}, nil).
+		Once()
+
+	k, err := r.Resolve(context.Background(), "requested")
+	suite.Require().NoError(err)
+	suite.Equal("requested", k.KeyID())
+	suite.Equal("material", k.Raw())
+
+	onRing, ok := ring.Get("requested")
+	suite.Require().True(ok)
+	suite.Equal(k, onRing)
+
+	f.AssertExpectations(suite.T())
+}
+
 func TestResolver(t *testing.T) {
 	suite.Run(t, new(ResolverSuite))
 }
