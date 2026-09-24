@@ -27,7 +27,7 @@ func (lof listenerOptionFunc) applyToListener(l *Listener) error {
 func WithFactory(f *touchstone.Factory) ListenerOption {
 	return listenerOptionFunc(func(l *Listener) error {
 		var (
-			errs      = make([]error, 0, 5)
+			errs      = make([]error, 0, 3)
 			metricErr error
 		)
 
@@ -40,56 +40,48 @@ func WithFactory(f *touchstone.Factory) ListenerOption {
 		l.refreshErrorTotal, metricErr = newRefreshErrorTotal(f)
 		errs = append(errs, metricErr)
 
-		l.resolveTotal, metricErr = newResolveTotal(f)
-		errs = append(errs, metricErr)
-
-		l.resolveErrorTotal, metricErr = newResolveErrorTotal(f)
-		errs = append(errs, metricErr)
-
 		return errors.Join(errs...)
 	})
 }
 
-// Listener handles refresh and resolve events, tallying metrics for both.
+// Listener is a clortho.Listener that tallies refresh metrics, labeled by
+// source URI.
 type Listener struct {
-	refreshTotal      prometheus.Counter
-	refreshKeys       prometheus.Gauge
-	refreshErrorTotal prometheus.Counter
-
-	resolveTotal      prometheus.Counter
-	resolveErrorTotal prometheus.Counter
+	refreshTotal      *prometheus.CounterVec
+	refreshKeys       *prometheus.GaugeVec
+	refreshErrorTotal *prometheus.CounterVec
 }
 
+var _ clortho.Listener = (*Listener)(nil)
+
 // NewListener creates a metrics Listener using the supplied set of options.
-// If no options are passed, the returned Listener will be a no-op.
+// A Listener created with no options records nothing.
 func NewListener(options ...ListenerOption) (l *Listener, err error) {
 	l = &Listener{}
 
+	errs := make([]error, 0, len(options))
 	for _, o := range options {
-		err = o.applyToListener(l)
+		errs = append(errs, o.applyToListener(l))
 	}
 
-	if err != nil {
+	if err = errors.Join(errs...); err != nil {
 		l = nil
 	}
 
 	return
 }
 
-// OnRefreshEvent tallies metrics for the given RefreshEvent.
+// OnRefreshEvent tallies metrics for one refresh of one source.
 func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
-	l.refreshTotal.Add(1.0)
-	l.refreshKeys.Set(float64(event.Keys.Len()))
-
-	if event.Err != nil {
-		l.refreshErrorTotal.Add(1.0)
+	if l.refreshTotal == nil {
+		return
 	}
-}
 
-// OnResolveEvent tallies metrics for the given ResolveEvent.
-func (l *Listener) OnResolveEvent(event clortho.ResolveEvent) {
-	l.resolveTotal.Add(1.0)
+	labels := prometheus.Labels{SourceLabel: event.URI}
+	l.refreshTotal.With(labels).Add(1.0)
+	l.refreshKeys.With(labels).Set(float64(len(event.KeyIDs)))
+
 	if event.Err != nil {
-		l.resolveErrorTotal.Add(1.0)
+		l.refreshErrorTotal.With(labels).Add(1.0)
 	}
 }
