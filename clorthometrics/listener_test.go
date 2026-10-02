@@ -8,196 +8,121 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/stretchr/testify/suite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xmidt-org/clortho"
 	"github.com/xmidt-org/touchstone"
 	"github.com/xmidt-org/touchstone/touchtest"
 	"go.uber.org/zap"
 )
 
-const (
-	testURL = "https://example.com"
-
-	// keys is a jwk set used to stand-in for an event's Keys field
-	keys = `{
-    "keys": [
-        {
-		    "kid": "A",
-            "p": "yD2VKf9BGOHp1dbWKg7m4dccMnYvxCrzpq6S3-cO9egK6IJYFeA5AidCsAZiQaVuFCigoFgelEQIatjjcNdhZE_ideul7xjIkaoj6AJ48nZheYmvunKDUIus_3UqV18tJ7Lofiz0u5dVZe_R9NbYH4n53lX7fcOLMcIuHkIP2f8",
-            "kty": "RSA",
-            "q": "wK5h6m64OBedeRA1Kq-Uqjg5rzeBuXhfOHiOSB6yCdMTbgtRmouUYdm-eQ61f1B2YtZY2sl35AibzD8FALR9FxHb9fe1EkJ9GJBZVmJA9Aazd4f71SOJ7vcWlgo5awDH3dv4Mn_NgiRkLLedADvB9HxWcTxjYeXkEEqPHUmlb_U",
-            "d": "hpz_FlBnWDop_JzW6EGwQV3sM2nvU-8HfjquekXe5xju0rISoYzX7qxvI3uXkzJeWsOnYpI5RdWXGgfzCDlhPP5SLml9kYbqTjzbOVSmXBrgTPF1MNdeYH-DiGu2rfh8WO7ziGMybTmEZ7DWm6Y3jYI-Bm3dWhW_8FX2FQbOIUJlX82Z25lKepaNPAUOywM7mf4BVLwroYIyc1iB8tTFtdNnRMou1IsAn-FEkySp9I2AnmPlVEuoRHo4TBonb-b4clMrsWoB3NLfNDbgrTrFTd3z6SRSKVTJbxqR-EODumhUK0KRiKX36N6-pvPvDsAEoaCUTH63HLAUaSqWN_yvwQ",
-            "e": "AQAB",
-            "qi": "dcm8P4aN5RRYR-4M-9Z4VWUlF7dXLR3TN-BNOvhQHB22vGwbtLQhpL0NY1ppl-FtCr4ExXXahYIAp-Lmsw4fnqbiCsXTXn93Boa1pJopB2R-JCf2_fyoJg0Slsjb2yqjqwW8M9h1uiojHeyxuDOay8z3yzbgXt8w4NeUEC4spUs",
-            "dp": "iSvepjFtB72i8VFFzvP8aBNzBoJ-AFUoKjQG-4kOb5hw-IxqCTpb80Sv42PMJYpNGVQnjRAwioL8fS1syR1SY2RyDzPJrTv-EgNKq6Id9oLwDVEr536QxDma3jkGM2pIxZxCtkTXtjZaUwVxf9c5oIlleVDPgnzVOtX5v9Kjh0M",
-            "dq": "E2L4UyAkxPALVhz9XHgiGyZhF3IcSU8FNadbmYINI9PrBo14_nXAzj-cXI3QUSkFYFh0xD61I2qCUoCcvj9qvqF7Yjo0K8wozgnoEzr7khICiKpT-lQDEtolmZ8Zu9xuP7JcPKiDQu7qbV1kHJvmnfTMtcP_s9_vnHwD_kxkquk",
-            "n": "lraWUZZmIT6IDyTtO_ho-XMPyPUPoT97P00P3uvaRU792L-cuQJQzOcvRGBnEQMe4Yj7yzYtPQwgiUjvYcXkmRnr-R-lSreGDsu8XLcM-8WgPV_6jVUet9AD9Af5HWuhVNKtJdmzlxdX7XrU_E_-i_2r2_IFkA4bzmoJ6hWiwok-VssktCvvIgxLB7tu2D3tzS6bDTtgTwfOjun4UJXltkKbX6lI_nDfYXjV5w4nlS-axQ5Hj6lHJKmE5a1mo7AyFvUY9DWMbMBY2Dy_wigV5heSz17rNPVLSJAoYrB34N31g8gCoOVe3GWaGKCzPSRcmE1l2H9taL11c33eUQwyCw"
-        },
-        {
-		    "kid": "B",
-            "kty": "EC",
-            "d": "pEKRYzqBzvAfIlPxppQG8hSxtJxRm-DLqpCPjx26bEDwCIz2JdISM-lGV1euPIhl",
-            "crv": "P-384",
-            "x": "jhH5USR4IO3uaURYSn4z8IDn7MnWGGa76eNZTvI8Zc08XSQ0YzikcZtLAVUw1zoc",
-            "y": "uILRhb6eP2PnfSk1xBdttboPXJO_o21Ho0Tb5de6kb46BGaVLPD-RC6zJ2KmYWIm"
-        }
-    ]
-}`
-)
-
-// errorListenerOption is a ListenerOption that returns an error.
-// This type is necessary because we currently don't have an option
-// that we can test NewListener when it returns an error.
+// errorListenerOption is a ListenerOption that returns an error, since no
+// real option can fail without a broken factory.
 type errorListenerOption struct {
-	expectedError error
+	err error
 }
 
-func (elo errorListenerOption) applyToListener(l *Listener) error {
-	return elo.expectedError
-}
+func (elo errorListenerOption) applyToListener(*Listener) error { return elo.err }
 
-type ListenerSuite struct {
-	suite.Suite
-
-	keys []clortho.Key
-}
-
-func (suite *ListenerSuite) SetupSuite() {
-	p, err := clortho.NewParser()
-	suite.Require().NoError(err)
-	suite.Require().NotNil(p)
-
-	suite.keys, err = p.Parse(clortho.MediaTypeJWKSet, []byte(keys))
-	suite.Require().NoError(err)
-}
-
-func (suite *ListenerSuite) newFactory() (*prometheus.Registry, *touchstone.Factory) {
+func newFactory() (*prometheus.Registry, *touchstone.Factory) {
 	r := prometheus.NewPedanticRegistry()
-	f := touchstone.NewFactory(touchstone.Config{}, zap.L(), r)
-	return r, f
+	return r, touchstone.NewFactory(touchstone.Config{}, zap.NewNop(), r)
 }
 
-func (suite *ListenerSuite) newListener(f *touchstone.Factory) *Listener {
+func newListener(t *testing.T, f *touchstone.Factory) *Listener {
 	l, err := NewListener(WithFactory(f))
-	suite.Require().NoError(err)
-	suite.Require().NotNil(l)
+	require.NoError(t, err)
+	require.NotNil(t, l)
 	return l
 }
 
-func (suite *ListenerSuite) TestNewListenerError() {
-	var (
-		expectedError = errors.New("expected")
-		listener, err = NewListener(errorListenerOption{expectedError: expectedError})
-	)
-
-	suite.Nil(listener)
-	suite.ErrorIs(err, expectedError)
+func TestNewListenerOptionError(t *testing.T) {
+	expected := errors.New("expected")
+	l, err := NewListener(errorListenerOption{err: expected})
+	assert.Nil(t, l)
+	assert.ErrorIs(t, err, expected)
 }
 
-func (suite *ListenerSuite) testOnRefreshEventSuccess() {
-	var (
-		actual, actualFactory = suite.newFactory()
-		actualListener        = suite.newListener(actualFactory)
+func TestNewListenerNoOptionsRecordsNothing(t *testing.T) {
+	l, err := NewListener()
+	require.NoError(t, err)
+	require.NotNil(t, l)
 
-		expected, expectedFactory = suite.newFactory()
-		expectedListener          = suite.newListener(expectedFactory)
+	assert.NotPanics(t, func() {
+		l.OnRefreshEvent(clortho.RefreshEvent{URI: "https://keys.example.com/jwks", KeyIDs: []string{"a"}})
+	})
+}
 
-		assert = touchtest.New(suite.T())
-	)
+func TestWithFactoryFailsWhenAMetricIsAlreadyRegistered(t *testing.T) {
+	_, f := newFactory()
+	_, err := f.NewCounterVec(prometheus.CounterOpts{Name: RefreshTotalName, Help: "taken"}, SourceLabel)
+	require.NoError(t, err)
 
-	expectedListener.refreshTotal.Add(1.0)
-	expectedListener.refreshKeys.Set(float64(len(suite.keys)))
-	assert.Expect(expected)
+	l, err := NewListener(WithFactory(f))
+	assert.Nil(t, l)
+	assert.Error(t, err)
+}
+
+func TestOnRefreshEventSuccess(t *testing.T) {
+	actual, actualFactory := newFactory()
+	actualListener := newListener(t, actualFactory)
+	expected, expectedFactory := newFactory()
+	expectedListener := newListener(t, expectedFactory)
+
+	labels := prometheus.Labels{SourceLabel: "https://keys.example.com/jwks"}
+	expectedListener.refreshTotal.With(labels).Add(1.0)
+	expectedListener.refreshKeys.With(labels).Set(2.0)
+	assertions := touchtest.New(t)
+	assertions.Expect(expected)
 
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
-		URI:  testURL,
-		Keys: suite.keys,
+		URI:    "https://keys.example.com/jwks",
+		KeyIDs: []string{"a", "b"},
 	})
 
-	assert.GatherAndCompare(actual)
+	assertions.GatherAndCompare(actual)
 }
 
-func (suite *ListenerSuite) testOnRefreshEventError() {
-	var (
-		actual, actualFactory = suite.newFactory()
-		actualListener        = suite.newListener(actualFactory)
+func TestOnRefreshEventError(t *testing.T) {
+	actual, actualFactory := newFactory()
+	actualListener := newListener(t, actualFactory)
+	expected, expectedFactory := newFactory()
+	expectedListener := newListener(t, expectedFactory)
 
-		expected, expectedFactory = suite.newFactory()
-		expectedListener          = suite.newListener(expectedFactory)
-
-		assert = touchtest.New(suite.T())
-	)
-
-	expectedListener.refreshTotal.Add(1.0)
-	expectedListener.refreshErrorTotal.Add(1.0)
-	expectedListener.refreshKeys.Set(float64(len(suite.keys)))
-	assert.Expect(expected)
+	labels := prometheus.Labels{SourceLabel: "https://keys.example.com/jwks"}
+	expectedListener.refreshTotal.With(labels).Add(1.0)
+	expectedListener.refreshErrorTotal.With(labels).Add(1.0)
+	expectedListener.refreshKeys.With(labels).Set(1.0)
+	assertions := touchtest.New(t)
+	assertions.Expect(expected)
 
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
-		URI:  testURL,
-		Err:  errors.New("expected"),
-		Keys: suite.keys,
+		URI:    "https://keys.example.com/jwks",
+		Err:    errors.New("expected"),
+		KeyIDs: []string{"a"},
 	})
 
-	assert.GatherAndCompare(actual)
+	assertions.GatherAndCompare(actual)
 }
 
-func (suite *ListenerSuite) TestOnRefreshEvent() {
-	suite.Run("Success", suite.testOnRefreshEventSuccess)
-	suite.Run("Error", suite.testOnRefreshEventError)
-}
+func TestOnRefreshEventKeepsSourcesApart(t *testing.T) {
+	actual, actualFactory := newFactory()
+	actualListener := newListener(t, actualFactory)
+	expected, expectedFactory := newFactory()
+	expectedListener := newListener(t, expectedFactory)
 
-func (suite *ListenerSuite) testOnResolveEventSuccess() {
-	var (
-		actual, actualFactory = suite.newFactory()
-		actualListener        = suite.newListener(actualFactory)
+	one := prometheus.Labels{SourceLabel: "https://one.example.com/jwks"}
+	two := prometheus.Labels{SourceLabel: "https://two.example.com/jwks"}
+	expectedListener.refreshTotal.With(one).Add(1.0)
+	expectedListener.refreshKeys.With(one).Set(3.0)
+	expectedListener.refreshTotal.With(two).Add(1.0)
+	expectedListener.refreshKeys.With(two).Set(0.0)
+	expectedListener.refreshErrorTotal.With(two).Add(1.0)
+	assertions := touchtest.New(t)
+	assertions.Expect(expected)
 
-		expected, expectedFactory = suite.newFactory()
-		expectedListener          = suite.newListener(expectedFactory)
+	actualListener.OnRefreshEvent(clortho.RefreshEvent{URI: "https://one.example.com/jwks", KeyIDs: []string{"a", "b", "c"}})
+	actualListener.OnRefreshEvent(clortho.RefreshEvent{URI: "https://two.example.com/jwks", Err: errors.New("expected")})
 
-		assert = touchtest.New(suite.T())
-	)
-
-	expectedListener.resolveTotal.Add(1.0)
-	assert.Expect(expected)
-
-	actualListener.OnResolveEvent(clortho.ResolveEvent{
-		URI:   testURL,
-		KeyID: "test",
-	})
-
-	assert.GatherAndCompare(actual)
-}
-
-func (suite *ListenerSuite) testOnResolveEventError() {
-	var (
-		actual, actualFactory = suite.newFactory()
-		actualListener        = suite.newListener(actualFactory)
-
-		expected, expectedFactory = suite.newFactory()
-		expectedListener          = suite.newListener(expectedFactory)
-
-		assert = touchtest.New(suite.T())
-	)
-
-	expectedListener.resolveTotal.Add(1.0)
-	expectedListener.resolveErrorTotal.Add(1.0)
-	assert.Expect(expected)
-
-	actualListener.OnResolveEvent(clortho.ResolveEvent{
-		URI:   testURL,
-		KeyID: "test",
-		Err:   errors.New("expected"),
-	})
-
-	assert.GatherAndCompare(actual)
-}
-
-func (suite *ListenerSuite) TestOnResolveEvent() {
-	suite.Run("Success", suite.testOnResolveEventSuccess)
-	suite.Run("Error", suite.testOnResolveEventError)
-}
-
-func TestListener(t *testing.T) {
-	suite.Run(t, new(ListenerSuite))
+	assertions.GatherAndCompare(actual)
 }

@@ -26,18 +26,22 @@ By participating, you agree to this Code.
 
 ## Details
 
-clortho fetches, caches, and refreshes the keys a service needs to verify JWS
-signatures, such as those on JWTs, and exposes them to
-[jwx](https://github.com/lestrrat-go/jwx) as a `jws.KeyProvider`.  A `KeyRing`
-holds the keys, a `Refresher` keeps it current from configured sources, and
-`NewKeyProvider` wraps it for verification.  An optional `Resolver` fetches
-individual keys on demand for callers that need one, and `clorthofx` wires all
-of it into a [go.uber.org/fx](https://github.com/uber-go/fx) application.
+clortho supplies the keys a service needs to verify JWS signatures, such as
+those on JWTs, as a `jws.KeyProvider` for
+[jwx](https://github.com/lestrrat-go/jwx).  A `Provider` polls each
+configured source for its complete key set, keeps the keys in one map by key
+ID, and answers jwx's `FetchKeys` from that map.  It never fetches a key on
+demand, so a token cannot cause a request.
+
+Configuration is a plain `Config` struct: a list of sources, each with its
+own `*http.Client` and refresh intervals, and a `Verify` policy.  There are
+no functional options.  `clorthozap` and `clorthometrics` log and count
+refreshes, and `clorthofx` wires a `Provider` into a
+[go.uber.org/fx](https://github.com/uber-go/fx) application.
 
 The package documentation at
 [pkg.go.dev/github.com/xmidt-org/clortho](https://pkg.go.dev/github.com/xmidt-org/clortho)
-is the full overview, including which configuration feeds verification and
-which does not.
+has the full overview, including the readiness and rotation behavior.
 
 ## Install
 
