@@ -9,7 +9,8 @@ import (
 )
 
 // RefreshEvent describes one refresh of one source.  It is dispatched to every
-// Listener after every attempt, successful or not.
+// Listener after every attempt, successful or not.  The one exception is an
+// attempt that Stop interrupts, which is abandoned without an event.
 //
 // Events carry key IDs, never keys.  A string identifier is always a KeyID in
 // this package, and "key" alone always means the key material.
@@ -127,6 +128,8 @@ func (t *refreshTask) requestRefresh(ctx, runCtx context.Context) {
 
 // refresh loads the source once, applies the result to the ring, records the
 // outcome, dispatches an event, and returns the time until the next refresh.
+// A load that fails because ctx was canceled is abandoned instead: the status
+// and the ring are left as they were and no event is dispatched.
 func (t *refreshTask) refresh(ctx context.Context) time.Duration {
 	t.p.stateLock.Lock()
 	since := t.p.states[t.index].lastModified
@@ -134,6 +137,14 @@ func (t *refreshTask) refresh(ctx context.Context) time.Duration {
 
 	event := RefreshEvent{URI: redactURI(t.source.URI)}
 	c, err := load(ctx, t.source, since)
+	if err != nil && ctx.Err() != nil {
+		// Stop canceled the loop while the load was in flight.  that is the
+		// Provider abandoning the attempt, not the source failing, so nothing is
+		// recorded or dispatched.  the interval is an ordinary one, never zero,
+		// so that run finds the canceled context before the timer can fire.
+		return t.jitter.nextInterval(0, err)
+	}
+
 	switch {
 	case err != nil:
 		event.KeyIDs = t.p.ring.keyIDsFor(t.index)

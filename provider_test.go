@@ -258,6 +258,48 @@ func TestProviderStopHonorsTheContext(t *testing.T) {
 	assert.True(t, err == nil || errors.Is(err, context.Canceled))
 }
 
+func TestProviderStopDuringARefreshIsNotAFailure(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	body := jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil))
+
+	// the first request is answered; every later one announces itself and then
+	// hangs until the client gives up on it
+	var (
+		requests atomic.Int32
+		inFlight = make(chan struct{}, 1)
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			_, _ = w.Write(body)
+			return
+		}
+
+		inFlight <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+
+	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	before := p.Status()
+	require.NoError(t, before[0].LastErr)
+
+	// the scheduled refresh is now waiting on the server
+	fc.advanceToTimer(t)
+	select {
+	case <-inFlight:
+	case <-time.After(5 * time.Second):
+		require.Fail(t, "the scheduled refresh never reached the server")
+	}
+
+	// Stop waits for the loop, so everything the interrupted refresh was going
+	// to record or dispatch has happened by the time it returns
+	require.NoError(t, p.Stop(context.Background()))
+	assert.Equal(t, before, p.Status())
+	assert.Equal(t, []string{"a"}, p.KeyIDs())
+	assert.Empty(t, l.events)
+}
+
 func TestProviderRefreshEventDescribesTheFirstLoad(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "b", nil), publicJWK(t, ecKey, "a", nil))

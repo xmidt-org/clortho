@@ -142,6 +142,10 @@ func (p *Provider) Start(context.Context) error {
 // Stop ends the refresh loops and waits for them to exit, or for ctx to end.
 // The ring keeps its keys, and Start may be called again.
 //
+// A refresh that Stop interrupts is abandoned, not failed: Status keeps the
+// outcome of the last attempt that finished, and no RefreshEvent is
+// dispatched for the interrupted one.
+//
 // Stop returns ErrNotStarted if the Provider is not running.
 func (p *Provider) Stop(ctx context.Context) error {
 	p.runLock.Lock()
