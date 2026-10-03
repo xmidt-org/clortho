@@ -31,6 +31,13 @@ type RefreshEvent struct {
 
 	// DeletedKeyIDs are the key IDs this refresh removed, sorted.
 	DeletedKeyIDs []string
+
+	// KeySetBytes is the size of the key set the keys in KeyIDs came from: what
+	// this source served at its last successful load.  Like KeyIDs it describes
+	// what is on the ring, so a failed refresh leaves it unchanged, as does a
+	// refresh the server answered with a 304.  Zero if the source has never
+	// loaded.
+	KeySetBytes int64
 }
 
 // Listener is a sink for RefreshEvents.  OnRefreshEvent is called from the
@@ -167,7 +174,8 @@ func (t *refreshTask) refresh(ctx context.Context) time.Duration {
 	}
 
 	event.Err = err
-	retryWait, loaded := t.record(c, err)
+	retryWait, loaded, keySetBytes := t.record(c, err)
+	event.KeySetBytes = keySetBytes
 	t.p.dispatch(event)
 	return t.nextRefresh(c, err, retryWait, loaded)
 }
@@ -212,8 +220,9 @@ func rejectedContent(err error) bool {
 
 // record updates the source's status after an attempt.  It returns how long
 // the key set server asked clortho to wait before the next attempt, or zero if
-// it did not ask, and whether the source has ever loaded successfully.
-func (t *refreshTask) record(c content, err error) (retryWait time.Duration, loaded bool) {
+// it did not ask, whether the source has ever loaded successfully, and the
+// size of the key set its keys on the ring came from.
+func (t *refreshTask) record(c content, err error) (retryWait time.Duration, loaded bool, keySetBytes int64) {
 	t.p.stateLock.Lock()
 	defer t.p.stateLock.Unlock()
 
@@ -229,13 +238,14 @@ func (t *refreshTask) record(c content, err error) (retryWait time.Duration, loa
 			state.retryAt = now.Add(min(retryWait, t.source.MaxRefreshInterval))
 		}
 
-		return retryWait, !state.status.LastRetrieved.IsZero()
+		return retryWait, !state.status.LastRetrieved.IsZero(), state.keySetBytes
 	}
 
 	state.status.LastRetrieved = now
 	if !c.notModified {
 		state.lastModified = c.lastModified
+		state.keySetBytes = int64(len(c.data))
 	}
 
-	return 0, true
+	return 0, true, state.keySetBytes
 }

@@ -603,6 +603,64 @@ func TestProviderRefreshOnUnknownKeyIDWaitsOutTheServersWait(t *testing.T) {
 	assert.Equal(t, int32(3), server.requests.Load())
 }
 
+func TestProviderRefreshEventCarriesTheKeySetSize(t *testing.T) {
+	rsaKey, ecKey := testPrivateKeys(t)
+	first := jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil))
+	second := jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil), publicJWK(t, ecKey, "b", nil))
+	server := newKeyServer(t)
+	server.serveRaw(first)
+
+	// testProvider would consume the first event, which is wanted here
+	p, err := New(Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	require.NoError(t, err)
+	fc := newTestClock()
+	p.clock = fc
+	l := newEventListener()
+	p.AddListener(l)
+	require.NoError(t, p.Start(context.Background()))
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
+
+	assert.Equal(t, int64(len(first)), l.next(t).KeySetBytes)
+
+	// no body arrives, so the size is still that of the key set on the ring
+	server.fail(http.StatusInternalServerError)
+	fc.advanceToTimer(t)
+	e := l.next(t)
+	require.Error(t, e.Err)
+	assert.Equal(t, int64(len(first)), e.KeySetBytes)
+
+	// a body arrives but is rejected, so it is not the key set on the ring
+	server.serveRaw([]byte(symmetricSet))
+	fc.advanceToTimer(t)
+	e = l.next(t)
+	require.ErrorIs(t, e.Err, ErrSymmetricKey)
+	assert.Equal(t, int64(len(first)), e.KeySetBytes)
+
+	// a new key set replaces the old one, and its size with it
+	server.serveRaw(second)
+	fc.advanceToTimer(t)
+	e = l.next(t)
+	require.NoError(t, e.Err)
+	assert.Equal(t, []string{"a", "b"}, e.KeyIDs)
+	assert.Equal(t, int64(len(second)), e.KeySetBytes)
+}
+
+func TestProviderRefreshEventHasNoKeySetSizeBeforeTheFirstLoad(t *testing.T) {
+	server := newKeyServer(t)
+	server.fail(http.StatusInternalServerError)
+
+	p, err := New(Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	require.NoError(t, err)
+	l := newEventListener()
+	p.AddListener(l)
+	require.NoError(t, p.Start(context.Background()))
+	t.Cleanup(func() { _ = p.Stop(context.Background()) })
+
+	e := l.next(t)
+	require.Error(t, e.Err)
+	assert.Zero(t, e.KeySetBytes)
+}
+
 func TestProviderRefreshNotModified(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	var since string
@@ -630,6 +688,7 @@ func TestProviderRefreshNotModified(t *testing.T) {
 	assert.Equal(t, []string{"a"}, e.KeyIDs)
 	assert.Empty(t, e.NewKeyIDs)
 	assert.Empty(t, e.DeletedKeyIDs)
+	assert.Equal(t, int64(len(jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil)))), e.KeySetBytes, "a 304 has no body, and the key set is the one already held")
 	assert.Equal(t, "Wed, 21 Oct 2015 07:28:00 GMT", since)
 	assert.Equal(t, 2, requests)
 
@@ -678,11 +737,13 @@ func TestProviderFileSource(t *testing.T) {
 	assert.Zero(t, status.LastStatusCode)
 	assert.False(t, status.LastRetrieved.IsZero())
 
-	require.NoError(t, os.WriteFile(path, jwkSetJSON(t, publicJWK(t, ecKey, "b", nil)), 0o600))
+	second := jwkSetJSON(t, publicJWK(t, ecKey, "b", nil))
+	require.NoError(t, os.WriteFile(path, second, 0o600))
 	fc.advanceToTimer(t)
 	e := l.next(t)
 	assert.NoError(t, e.Err)
 	assert.Equal(t, []string{"b"}, p.KeyIDs())
+	assert.Equal(t, int64(len(second)), e.KeySetBytes)
 }
 
 func TestProviderRedactsCredentialsInEventsAndStatus(t *testing.T) {

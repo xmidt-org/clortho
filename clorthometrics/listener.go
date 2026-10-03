@@ -27,7 +27,7 @@ func (lof listenerOptionFunc) applyToListener(l *Listener) error {
 func WithFactory(f *touchstone.Factory) ListenerOption {
 	return listenerOptionFunc(func(l *Listener) error {
 		var (
-			errs      = make([]error, 0, 3)
+			errs      = make([]error, 0, 4)
 			metricErr error
 		)
 
@@ -35,6 +35,9 @@ func WithFactory(f *touchstone.Factory) ListenerOption {
 		errs = append(errs, metricErr)
 
 		l.refreshKeys, metricErr = newRefreshKeys(f)
+		errs = append(errs, metricErr)
+
+		l.refreshKeySetBytes, metricErr = newRefreshKeySetBytes(f)
 		errs = append(errs, metricErr)
 
 		l.refreshErrorTotal, metricErr = newRefreshErrorTotal(f)
@@ -45,11 +48,13 @@ func WithFactory(f *touchstone.Factory) ListenerOption {
 }
 
 // Listener is a clortho.Listener that tallies refresh metrics, labeled by
-// source URI.
+// source URI.  The error total is also labeled by the reason for the failure;
+// see ReasonLabel.
 type Listener struct {
-	refreshTotal      *prometheus.CounterVec
-	refreshKeys       *prometheus.GaugeVec
-	refreshErrorTotal *prometheus.CounterVec
+	refreshTotal       *prometheus.CounterVec
+	refreshKeys        *prometheus.GaugeVec
+	refreshKeySetBytes *prometheus.GaugeVec
+	refreshErrorTotal  *prometheus.CounterVec
 }
 
 var _ clortho.Listener = (*Listener)(nil)
@@ -80,8 +85,12 @@ func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 	labels := prometheus.Labels{SourceLabel: event.URI}
 	l.refreshTotal.With(labels).Add(1.0)
 	l.refreshKeys.With(labels).Set(float64(len(event.KeyIDs)))
+	l.refreshKeySetBytes.With(labels).Set(float64(event.KeySetBytes))
 
 	if event.Err != nil {
-		l.refreshErrorTotal.With(labels).Add(1.0)
+		l.refreshErrorTotal.With(prometheus.Labels{
+			SourceLabel: event.URI,
+			ReasonLabel: reason(event.Err),
+		}).Add(1.0)
 	}
 }

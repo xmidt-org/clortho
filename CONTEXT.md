@@ -116,7 +116,7 @@ _Avoid_: key validation, key filter
 ### Observing
 
 **Refresh Event**:
-The report of one **Refresh**, delivered to every **Listener**: the source, the error if there was one, and the **Key IDs** the source now supplies, added, and removed. It carries key IDs, never **Keys**.
+The report of one **Refresh**, delivered to every **Listener**: the source, the error if there was one, the **Key IDs** the source now supplies, added, and removed, and the size of the **Key Set** those keys came from. It carries key IDs, never **Keys**.
 _Avoid_: notification, callback
 
 **Listener**:

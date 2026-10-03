@@ -5,6 +5,8 @@ package clorthometrics
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -72,12 +74,14 @@ func TestOnRefreshEventSuccess(t *testing.T) {
 	labels := prometheus.Labels{SourceLabel: "https://keys.example.com/jwks"}
 	expectedListener.refreshTotal.With(labels).Add(1.0)
 	expectedListener.refreshKeys.With(labels).Set(2.0)
+	expectedListener.refreshKeySetBytes.With(labels).Set(812.0)
 	assertions := touchtest.New(t)
 	assertions.Expect(expected)
 
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
-		URI:    "https://keys.example.com/jwks",
-		KeyIDs: []string{"a", "b"},
+		URI:         "https://keys.example.com/jwks",
+		KeyIDs:      []string{"a", "b"},
+		KeySetBytes: 812,
 	})
 
 	assertions.GatherAndCompare(actual)
@@ -91,16 +95,52 @@ func TestOnRefreshEventError(t *testing.T) {
 
 	labels := prometheus.Labels{SourceLabel: "https://keys.example.com/jwks"}
 	expectedListener.refreshTotal.With(labels).Add(1.0)
-	expectedListener.refreshErrorTotal.With(labels).Add(1.0)
+	expectedListener.refreshErrorTotal.With(prometheus.Labels{
+		SourceLabel: "https://keys.example.com/jwks",
+		ReasonLabel: "other",
+	}).Add(1.0)
 	expectedListener.refreshKeys.With(labels).Set(1.0)
+	expectedListener.refreshKeySetBytes.With(labels).Set(406.0)
 	assertions := touchtest.New(t)
 	assertions.Expect(expected)
 
+	// a failed refresh still reports the keys, and the size of the key set,
+	// that the source supplied before
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{
-		URI:    "https://keys.example.com/jwks",
-		Err:    errors.New("expected"),
-		KeyIDs: []string{"a"},
+		URI:         "https://keys.example.com/jwks",
+		Err:         errors.New("expected"),
+		KeyIDs:      []string{"a"},
+		KeySetBytes: 406,
 	})
+
+	assertions.GatherAndCompare(actual)
+}
+
+func TestOnRefreshEventCountsErrorsByReason(t *testing.T) {
+	actual, actualFactory := newFactory()
+	actualListener := newListener(t, actualFactory)
+	expected, expectedFactory := newFactory()
+	expectedListener := newListener(t, expectedFactory)
+
+	const source = "https://keys.example.com/jwks"
+	labels := prometheus.Labels{SourceLabel: source}
+	expectedListener.refreshTotal.With(labels).Add(4.0)
+	expectedListener.refreshKeys.With(labels).Set(0.0)
+	expectedListener.refreshKeySetBytes.With(labels).Set(0.0)
+	expectedListener.refreshErrorTotal.With(prometheus.Labels{SourceLabel: source, ReasonLabel: "too_large"}).Add(1.0)
+	expectedListener.refreshErrorTotal.With(prometheus.Labels{SourceLabel: source, ReasonLabel: "http_503"}).Add(2.0)
+	expectedListener.refreshErrorTotal.With(prometheus.Labels{SourceLabel: source, ReasonLabel: "http_429"}).Add(1.0)
+	assertions := touchtest.New(t)
+	assertions.Expect(expected)
+
+	for _, err := range []error{
+		fmt.Errorf("%w: too big", clortho.ErrResponseTooLarge),
+		&clortho.HTTPError{Location: source, StatusCode: http.StatusServiceUnavailable},
+		&clortho.HTTPError{Location: source, StatusCode: http.StatusServiceUnavailable},
+		&clortho.HTTPError{Location: source, StatusCode: http.StatusTooManyRequests},
+	} {
+		actualListener.OnRefreshEvent(clortho.RefreshEvent{URI: source, Err: err})
+	}
 
 	assertions.GatherAndCompare(actual)
 }
@@ -115,13 +155,18 @@ func TestOnRefreshEventKeepsSourcesApart(t *testing.T) {
 	two := prometheus.Labels{SourceLabel: "https://two.example.com/jwks"}
 	expectedListener.refreshTotal.With(one).Add(1.0)
 	expectedListener.refreshKeys.With(one).Set(3.0)
+	expectedListener.refreshKeySetBytes.With(one).Set(1200.0)
 	expectedListener.refreshTotal.With(two).Add(1.0)
 	expectedListener.refreshKeys.With(two).Set(0.0)
-	expectedListener.refreshErrorTotal.With(two).Add(1.0)
+	expectedListener.refreshKeySetBytes.With(two).Set(0.0)
+	expectedListener.refreshErrorTotal.With(prometheus.Labels{
+		SourceLabel: "https://two.example.com/jwks",
+		ReasonLabel: "other",
+	}).Add(1.0)
 	assertions := touchtest.New(t)
 	assertions.Expect(expected)
 
-	actualListener.OnRefreshEvent(clortho.RefreshEvent{URI: "https://one.example.com/jwks", KeyIDs: []string{"a", "b", "c"}})
+	actualListener.OnRefreshEvent(clortho.RefreshEvent{URI: "https://one.example.com/jwks", KeyIDs: []string{"a", "b", "c"}, KeySetBytes: 1200})
 	actualListener.OnRefreshEvent(clortho.RefreshEvent{URI: "https://two.example.com/jwks", Err: errors.New("expected")})
 
 	assertions.GatherAndCompare(actual)

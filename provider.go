@@ -52,6 +52,10 @@ type sourceState struct {
 	// lastModified is the Last-Modified of the last successful HTTP load, sent
 	// back as If-Modified-Since.
 	lastModified time.Time
+
+	// keySetBytes is the size of the key set read at the last successful load
+	// that was not a 304: the one the source's keys on the ring came from.
+	keySetBytes int64
 }
 
 // Provider supplies verification keys.  It is the one thing clortho makes,
