@@ -13,7 +13,8 @@ var (
 	ErrNoKeySources = errors.New("at least one source is required")
 
 	// ErrUnsupportedScheme is returned by New when a source URI is not a file
-	// path or a file, http, or https URI.
+	// path or a file, http, or https URI.  That includes a source whose URI
+	// cannot be parsed at all, since no supported scheme can be read from it.
 	ErrUnsupportedScheme = errors.New("source URI scheme is not supported; use file, http, or https")
 
 	// ErrAlreadyStarted is returned by Start when the Provider is already running.

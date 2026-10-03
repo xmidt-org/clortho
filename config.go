@@ -85,7 +85,7 @@ type RefreshSource struct {
 	// is stale after that, so 10 then means up to ten percent early.  The
 	// result is clipped to MinRefreshInterval and MaxRefreshInterval.
 	//
-	// Valid values are at least zero and less than one hundred; anything
+	// Valid values are greater than zero and less than one hundred; anything
 	// else, including zero, gets DefaultJitterPercentage.  Jitter cannot be
 	// turned off, since its purpose is to keep a fleet that started together
 	// from polling the key server in lockstep.
@@ -93,8 +93,8 @@ type RefreshSource struct {
 
 	// Client makes the requests for an http or https URI.  It owns timeout,
 	// redirects, TLS, proxies, and any authorization its transport adds.  If
-	// nil, a default client with DefaultHTTPTimeout and no redirects is used
-	// that does not follow redirects.  Ignored for a file source.
+	// nil, a default client is used that has DefaultHTTPTimeout and does not
+	// follow redirects.  Ignored for a file source.
 	Client *http.Client
 
 	// MaxResponseBytes caps the body read from an http or https URI.  A larger

@@ -78,9 +78,9 @@ type Provider struct {
 var _ jws.KeyProvider = (*Provider)(nil)
 
 // New builds a Provider from a Config.  It rejects a Config with no sources
-// (ErrNoKeySources), a source whose scheme is not file, http, or https
-// (ErrUnsupportedScheme), and a duplicate source URI.  Every problem is
-// reported, joined, rather than just the first.
+// (ErrNoKeySources), a source whose URI cannot be parsed or whose scheme is
+// not file, http, or https (ErrUnsupportedScheme), and a duplicate source URI.
+// Every problem is reported, joined, rather than just the first.
 //
 // The returned Provider is not running; call Start.
 func New(cfg Config) (*Provider, error) {
