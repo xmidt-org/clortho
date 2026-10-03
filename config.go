@@ -145,6 +145,16 @@ type VerifyConfig struct {
 	// answered 429 or 503 with a Retry-After is also left alone until that wait
 	// has passed.
 	//
+	// The wait has no limit of its own.  A lookup that triggers an early
+	// refresh, or that arrives while a refresh is already running, waits until
+	// every source has answered.  That can take as long as the slowest source's
+	// Client allows: DefaultHTTPTimeout for the default client, and without
+	// limit for a client that has no timeout.  The request being verified is
+	// held for all of that time.  The lookup stops waiting sooner only when the
+	// context jwx was given, and passes to FetchKeys, ends.  A service that
+	// needs a tighter bound puts a deadline on that context.  A refresh already
+	// under way carries on either way.
+	//
 	// Off, which is the default, an unknown key ID fails with ErrKeyNotFound
 	// and no request is made: a token can never cause the Provider to contact
 	// anything.
