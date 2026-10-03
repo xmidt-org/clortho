@@ -5,6 +5,7 @@ package clortho
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -97,14 +98,16 @@ func (t *refreshTask) run(ctx context.Context) {
 	}
 }
 
-// rateLimited reports whether the source was attempted within its minimum
-// interval, in which case an early refresh is refused.
+// rateLimited reports whether an early refresh is refused: the source was
+// attempted within its minimum interval, or the server asked for a wait that
+// has not yet passed.
 func (t *refreshTask) rateLimited() bool {
 	t.p.stateLock.Lock()
 	defer t.p.stateLock.Unlock()
 
-	last := t.p.states[t.index].lastAttempt
-	return t.p.clock.Now().Sub(last) < t.source.MinRefreshInterval
+	now := t.p.clock.Now()
+	state := &t.p.states[t.index]
+	return now.Sub(state.lastAttempt) < t.source.MinRefreshInterval || now.Before(state.retryAt)
 }
 
 // requestRefresh asks the loop for an early refresh and waits until it has
@@ -164,27 +167,75 @@ func (t *refreshTask) refresh(ctx context.Context) time.Duration {
 	}
 
 	event.Err = err
-	t.record(c, err)
+	retryWait, loaded := t.record(c, err)
 	t.p.dispatch(event)
-	return t.jitter.nextInterval(c.ttl, err)
+	return t.nextRefresh(c, err, retryWait, loaded)
 }
 
-// record updates the source's status after an attempt.
-func (t *refreshTask) record(c content, err error) {
+// nextRefresh returns the time until the source's next refresh.  After a
+// success that is the normal schedule.  After a failure it depends on what
+// went wrong:
+//
+//   - A wait the server asked for with Retry-After is taken as given, even
+//     when it is shorter than the source's minimum.  The server is the one
+//     that knows when it can answer.
+//   - A key set the source served and clortho rejected waits for the normal
+//     schedule, since asking again sooner would get the same key set.
+//     A source that has never loaded is the exception: it has no keys to
+//     fall back on, so it is retried after the minimum.
+//   - Anything else is retried after the minimum.
+func (t *refreshTask) nextRefresh(c content, err error, retryWait time.Duration, loaded bool) time.Duration {
+	switch {
+	case err == nil:
+		return t.jitter.nextInterval(c.ttl, nil)
+
+	case retryWait > 0:
+		return t.jitter.delayed(retryWait)
+
+	case loaded && rejectedContent(err):
+		return t.jitter.nextInterval(0, err)
+
+	default:
+		return t.jitter.delayed(t.source.MinRefreshInterval)
+	}
+}
+
+// rejectedContent reports whether a refresh failed because of what the source
+// served, rather than because the source could not be read.  The source
+// answered in full, so only a change at the source will change the outcome.
+func rejectedContent(err error) bool {
+	return errors.Is(err, ErrSymmetricKey) ||
+		errors.Is(err, ErrMissingKeyID) ||
+		errors.Is(err, ErrDuplicateKeyID) ||
+		errors.Is(err, ErrResponseTooLarge)
+}
+
+// record updates the source's status after an attempt.  It returns how long
+// the key set server asked clortho to wait before the next attempt, or zero if
+// it did not ask, and whether the source has ever loaded successfully.
+func (t *refreshTask) record(c content, err error) (retryWait time.Duration, loaded bool) {
 	t.p.stateLock.Lock()
 	defer t.p.stateLock.Unlock()
 
 	now := t.p.clock.Now()
 	state := &t.p.states[t.index]
 	state.lastAttempt = now
+	state.retryAt = time.Time{}
 	state.status.LastStatusCode = c.statusCode
 	state.status.LastErr = err
 	if err != nil {
-		return
+		if retryWait = c.retryWait(now); retryWait > 0 {
+			// the same wait the timer gets, before its jitter
+			state.retryAt = now.Add(min(retryWait, t.source.MaxRefreshInterval))
+		}
+
+		return retryWait, !state.status.LastRetrieved.IsZero()
 	}
 
 	state.status.LastRetrieved = now
 	if !c.notModified {
 		state.lastModified = c.lastModified
 	}
+
+	return 0, true
 }

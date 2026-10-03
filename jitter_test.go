@@ -89,6 +89,42 @@ func TestJitterSurvivesAHugeInterval(t *testing.T) {
 	assert.GreaterOrEqual(t, next, time.Minute)
 }
 
+func TestJitterDelayedOnlyMakesTheWaitLater(t *testing.T) {
+	j := newJitterer(jitterSource(time.Hour, time.Minute, 24*time.Hour, 10))
+	for range 1000 {
+		next := j.delayed(10 * time.Minute)
+		assert.GreaterOrEqual(t, next, 10*time.Minute)
+		assert.LessOrEqual(t, next, 11*time.Minute)
+	}
+}
+
+func TestJitterDelayedAppliesNoMinimum(t *testing.T) {
+	j := newJitterer(jitterSource(time.Hour, 10*time.Minute, 24*time.Hour, 10))
+	for range 1000 {
+		next := j.delayed(30 * time.Second)
+		assert.GreaterOrEqual(t, next, 30*time.Second)
+		assert.LessOrEqual(t, next, 33*time.Second)
+	}
+}
+
+func TestJitterDelayedNeverPassesTheMaximum(t *testing.T) {
+	j := newJitterer(jitterSource(time.Hour, time.Minute, 2*time.Hour, 10))
+	for range 1000 {
+		assert.Equal(t, 2*time.Hour, j.delayed(365*24*time.Hour))
+
+		// the jitter alone would carry this one past the maximum
+		next := j.delayed(119 * time.Minute)
+		assert.GreaterOrEqual(t, next, 119*time.Minute)
+		assert.LessOrEqual(t, next, 2*time.Hour)
+	}
+}
+
+func TestJitterDelayedSurvivesAHugeWait(t *testing.T) {
+	j := newJitterer(jitterSource(time.Hour, time.Minute, math.MaxInt64, 10))
+	assert.Equal(t, time.Duration(math.MaxInt64), j.delayed(math.MaxInt64))
+	assert.Positive(t, j.delayed(math.MaxInt64-1))
+}
+
 func TestPositive(t *testing.T) {
 	assert.Equal(t, int64(1), positive(0))
 	assert.Equal(t, int64(1), positive(-5))

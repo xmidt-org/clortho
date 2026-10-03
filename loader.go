@@ -41,6 +41,33 @@ type content struct {
 	// statusCode is the HTTP status, including on an HTTPError.  Zero for a
 	// file source or when no response arrived.
 	statusCode int
+
+	// retryDelay and retryDate hold the Retry-After of a 429 or 503 response,
+	// which is either a number of seconds or a date.  At most one is set.  Both
+	// are zero for any other status, and when the header is missing or
+	// invalid.  See retryWait.
+	retryDelay time.Duration
+	retryDate  time.Time
+}
+
+// minRetryAfter is the shortest wait taken from a Retry-After header.  A
+// server may say zero, meaning at once; one second keeps the refresh loop
+// from spinning against a server that says so on every response.
+const minRetryAfter = time.Second
+
+// retryWait returns how long the key set server asked clortho to wait before
+// it tries again, measured from now, or zero if it did not ask.  A date that has
+// already passed is treated as no instruction at all.
+func (c content) retryWait(now time.Time) time.Duration {
+	if c.retryDelay > 0 {
+		return c.retryDelay
+	}
+
+	if c.retryDate.After(now) {
+		return max(c.retryDate.Sub(now), minRetryAfter)
+	}
+
+	return 0
 }
 
 // load fetches a source once.  since, when non-zero, is the lastModified of
@@ -125,6 +152,12 @@ func loadHTTP(ctx context.Context, src RefreshSource, since time.Time) (content,
 		}
 
 	default:
+		// these two statuses are how a server asks for a pause, and Retry-After
+		// is where it says for how long
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+			c.retryDelay, c.retryDate = parseRetryAfter(resp.Header.Get("Retry-After"))
+		}
+
 		return c, &HTTPError{Location: redactURI(src.URI), StatusCode: resp.StatusCode}
 	}
 
@@ -145,6 +178,33 @@ func parseLastModified(value string) time.Time {
 	}
 
 	return t
+}
+
+// parseRetryAfter reads a Retry-After header, which is either a number of
+// seconds or an HTTP date.  A number is returned as delay, raised to
+// minRetryAfter if it is shorter, and a date as date.  An invalid value,
+// including a negative number, is treated as absent: both results are zero.
+func parseRetryAfter(value string) (delay time.Duration, date time.Time) {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		switch {
+		case seconds < 0:
+			return 0, time.Time{}
+
+		case seconds > math.MaxInt64/int64(time.Second):
+			// too long to hold in a Duration.  the wait is capped at the source's
+			// maximum before it is used, so the longest Duration stands in for it.
+			return math.MaxInt64, time.Time{}
+		}
+
+		return max(time.Duration(seconds)*time.Second, minRetryAfter), time.Time{}
+	}
+
+	if date, err := http.ParseTime(value); err == nil {
+		return 0, date
+	}
+
+	return 0, time.Time{}
 }
 
 // parseMaxAge extracts max-age from a Cache-Control header.  An invalid

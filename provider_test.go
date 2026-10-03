@@ -63,12 +63,13 @@ func (l *eventListener) none(t *testing.T) {
 // the server's shutdown.
 type keyServer struct {
 	*httptest.Server
-	lock     sync.Mutex
-	body     []byte
-	status   int
-	requests atomic.Int32
-	gate     chan struct{}
-	gateOnce sync.Once
+	lock       sync.Mutex
+	body       []byte
+	status     int
+	retryAfter string
+	requests   atomic.Int32
+	gate       chan struct{}
+	gateOnce   sync.Once
 }
 
 // openGate releases every request blocked on the gate, once.
@@ -90,8 +91,12 @@ func newKeyServer(t *testing.T, keys ...jwk.Key) *keyServer {
 
 		ks.requests.Add(1)
 		ks.lock.Lock()
-		body, status := ks.body, ks.status
+		body, status, retryAfter := ks.body, ks.status, ks.retryAfter
 		ks.lock.Unlock()
+
+		if retryAfter != "" {
+			w.Header().Set("Retry-After", retryAfter)
+		}
 
 		w.WriteHeader(status)
 		_, _ = w.Write(body)
@@ -102,17 +107,29 @@ func newKeyServer(t *testing.T, keys ...jwk.Key) *keyServer {
 }
 
 func (ks *keyServer) serve(t *testing.T, keys ...jwk.Key) {
-	body := jwkSetJSON(t, keys...)
+	ks.serveRaw(jwkSetJSON(t, keys...))
+}
+
+// serveRaw serves a body as is, for a set that jwkSetJSON cannot build.
+func (ks *keyServer) serveRaw(body []byte) {
 	ks.lock.Lock()
-	ks.body, ks.status = body, http.StatusOK
+	ks.body, ks.status, ks.retryAfter = body, http.StatusOK, ""
 	ks.lock.Unlock()
 }
 
 func (ks *keyServer) fail(status int) {
+	ks.busy(status, "")
+}
+
+// busy makes the server answer with a status and a Retry-After header.
+func (ks *keyServer) busy(status int, retryAfter string) {
 	ks.lock.Lock()
-	ks.status = status
+	ks.status, ks.retryAfter = status, retryAfter
 	ks.lock.Unlock()
 }
+
+// symmetricSet is a key set the Provider rejects with ErrSymmetricKey.
+const symmetricSet = `{"keys":[{"kty":"oct","k":"c2VjcmV0","kid":"shared"}]}`
 
 // testClock is a fake clock that records every timer the refresh loop arms,
 // so a test can move time to the next refresh.  It subscribes at creation,
@@ -120,6 +137,29 @@ func (ks *keyServer) fail(status int) {
 type testClock struct {
 	*chronon.FakeClock
 	timers chan chronon.FakeTimer
+
+	// held is a timer armedFor has looked at and advanceToTimer has yet to
+	// move the clock to.  Only the test's own goroutine touches it.
+	held []chronon.FakeTimer
+}
+
+// nextTimer returns the oldest timer the refresh loop armed that the clock
+// has not been moved to yet.
+func (tc *testClock) nextTimer(t *testing.T) chronon.FakeTimer {
+	if len(tc.held) > 0 {
+		timer := tc.held[0]
+		tc.held = tc.held[1:]
+		return timer
+	}
+
+	select {
+	case timer := <-tc.timers:
+		return timer
+
+	case <-time.After(5 * time.Second):
+		require.FailNow(t, "the refresh loop never armed a timer")
+		return nil
+	}
 }
 
 func newTestClock() *testClock {
@@ -134,13 +174,16 @@ func newTestClock() *testClock {
 
 // advanceToTimer moves the clock to the next timer the refresh loop armed.
 func (tc *testClock) advanceToTimer(t *testing.T) {
-	select {
-	case timer := <-tc.timers:
-		tc.Set(timer.When())
+	tc.Set(tc.nextTimer(t).When())
+}
 
-	case <-time.After(5 * time.Second):
-		require.Fail(t, "the refresh loop never armed a timer")
-	}
+// armedFor waits for the next timer the refresh loop arms and returns how far
+// ahead of the clock it is set.  The clock is not moved, and the timer is
+// still there for advanceToTimer.
+func (tc *testClock) armedFor(t *testing.T) time.Duration {
+	timer := tc.nextTimer(t)
+	tc.held = append(tc.held, timer)
+	return timer.When().Sub(tc.Now())
 }
 
 // testProvider builds a Provider over the given config with a test clock and
@@ -375,6 +418,189 @@ func TestProviderRefreshRejectsABadSetAndKeepsTheLastGoodKeys(t *testing.T) {
 	assert.Equal(t, []string{"a"}, e.KeyIDs)
 	assert.Equal(t, []string{"a"}, p.KeyIDs())
 	assert.ErrorIs(t, p.Status()[0].LastErr, ErrMissingKeyID)
+}
+
+// retrySource is a source whose intervals make the retry schedule easy to
+// tell apart: the normal schedule is about an hour, a retry about ten minutes.
+func retrySource(uri string) RefreshSource {
+	return RefreshSource{
+		URI:                uri,
+		RefreshInterval:    time.Hour,
+		MinRefreshInterval: 10 * time.Minute,
+		MaxRefreshInterval: 2 * time.Hour,
+		JitterPercentage:   10,
+	}
+}
+
+// failNextRefresh runs the scheduled refresh, which the caller has arranged
+// to fail, and returns how long the loop then waits before it retries.
+func failNextRefresh(t *testing.T, fc *testClock, l *eventListener) time.Duration {
+	fc.advanceToTimer(t)
+	require.Error(t, l.next(t).Err)
+	return fc.armedFor(t)
+}
+
+func TestProviderRetriesAFailureAfterTheMinimum(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
+	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	for _, status := range []int{http.StatusInternalServerError, http.StatusNotFound, http.StatusFound} {
+		server.fail(status)
+		wait := failNextRefresh(t, fc, l)
+		assert.GreaterOrEqual(t, wait, 10*time.Minute, "status %d", status)
+		assert.LessOrEqual(t, wait, 11*time.Minute, "status %d", status)
+	}
+}
+
+func TestProviderRetriesAnUnparseableBodyAfterTheMinimum(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
+	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	server.serveRaw([]byte(`<html>down for maintenance</html>`))
+	wait := failNextRefresh(t, fc, l)
+	assert.GreaterOrEqual(t, wait, 10*time.Minute)
+	assert.LessOrEqual(t, wait, 11*time.Minute)
+}
+
+func TestProviderRetriesWhenTheServerSays(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
+	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	// sooner than the minimum: the server's wait wins, and is never cut short
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
+		server.busy(status, "30")
+		wait := failNextRefresh(t, fc, l)
+		assert.GreaterOrEqual(t, wait, 30*time.Second, "status %d", status)
+		assert.LessOrEqual(t, wait, 33*time.Second, "status %d", status)
+	}
+
+	// between the minimum and the maximum
+	server.busy(http.StatusServiceUnavailable, "3000")
+	wait := failNextRefresh(t, fc, l)
+	assert.GreaterOrEqual(t, wait, 3000*time.Second)
+	assert.LessOrEqual(t, wait, 3300*time.Second)
+
+	// zero means at once, which is taken as a second so the loop cannot spin
+	server.busy(http.StatusServiceUnavailable, "0")
+	wait = failNextRefresh(t, fc, l)
+	assert.GreaterOrEqual(t, wait, time.Second)
+	assert.LessOrEqual(t, wait, 1100*time.Millisecond)
+}
+
+func TestProviderRetriesAtTheDateTheServerGives(t *testing.T) {
+	// the test clock starts at the wall clock, so the dates are relative to it
+	server := newKeyServer(t)
+	server.busy(http.StatusServiceUnavailable, time.Now().Add(20*time.Minute).UTC().Format(http.TimeFormat))
+	_, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	wait := fc.armedFor(t)
+	assert.GreaterOrEqual(t, wait, 19*time.Minute)
+	assert.LessOrEqual(t, wait, 22*time.Minute)
+}
+
+func TestProviderTreatsAPastRetryDateAsNoInstruction(t *testing.T) {
+	server := newKeyServer(t)
+	server.busy(http.StatusServiceUnavailable, time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat))
+	_, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	wait := fc.armedFor(t)
+	assert.GreaterOrEqual(t, wait, 10*time.Minute)
+	assert.LessOrEqual(t, wait, 11*time.Minute)
+}
+
+func TestProviderCapsTheServersWaitAtTheMaximum(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
+	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	server.busy(http.StatusTooManyRequests, "86400")
+	assert.Equal(t, 2*time.Hour, failNextRefresh(t, fc, l))
+}
+
+func TestProviderIgnoresRetryAfterOnOtherFailures(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
+	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	// only a 429 or a 503 is the server asking for a pause; an unusable
+	// Retry-After on one of those is no instruction either
+	server.busy(http.StatusInternalServerError, "30")
+	wait := failNextRefresh(t, fc, l)
+	assert.GreaterOrEqual(t, wait, 10*time.Minute)
+
+	server.busy(http.StatusServiceUnavailable, "soon")
+	wait = failNextRefresh(t, fc, l)
+	assert.GreaterOrEqual(t, wait, 10*time.Minute)
+	assert.LessOrEqual(t, wait, 11*time.Minute)
+}
+
+func TestProviderLeavesRejectedContentOnTheNormalSchedule(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
+	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	// the source answered in full, so asking again sooner changes nothing
+	server.serveRaw([]byte(symmetricSet))
+	wait := failNextRefresh(t, fc, l)
+	assert.ErrorIs(t, p.Status()[0].LastErr, ErrSymmetricKey)
+	assert.GreaterOrEqual(t, wait, 54*time.Minute)
+	assert.LessOrEqual(t, wait, 66*time.Minute)
+	assert.Equal(t, []string{"a"}, p.KeyIDs())
+}
+
+func TestProviderRetriesRejectedContentWhenItHasNeverLoaded(t *testing.T) {
+	server := newKeyServer(t)
+	server.serveRaw([]byte(symmetricSet))
+	p, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+
+	// with no keys to fall back on, the source is worth asking again soon
+	require.ErrorIs(t, p.Status()[0].LastErr, ErrSymmetricKey)
+	wait := fc.armedFor(t)
+	assert.GreaterOrEqual(t, wait, 10*time.Minute)
+	assert.LessOrEqual(t, wait, 11*time.Minute)
+}
+
+func TestProviderRetriesAMissingFileAfterTheMinimum(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "absent.json")
+	p, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(path)}})
+
+	require.Error(t, p.Status()[0].LastErr)
+	wait := fc.armedFor(t)
+	assert.GreaterOrEqual(t, wait, 10*time.Minute)
+	assert.LessOrEqual(t, wait, 11*time.Minute)
+}
+
+func TestProviderRefreshOnUnknownKeyIDWaitsOutTheServersWait(t *testing.T) {
+	rsaKey, ecKey := testPrivateKeys(t)
+	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
+	source := retrySource(server.URL)
+	p, fc, l := testProvider(t, Config{
+		Sources: []RefreshSource{source},
+		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+	})
+
+	// the server asks for an hour, which is longer than the minimum
+	server.busy(http.StatusServiceUnavailable, "3600")
+	fc.advanceToTimer(t)
+	require.Error(t, l.next(t).Err)
+	require.Equal(t, int32(2), server.requests.Load())
+
+	// past the minimum but inside the server's wait: no request is made
+	server.serve(t, publicJWK(t, ecKey, "ec", nil))
+	fc.Add(15 * time.Minute)
+	var sink recordingSink
+	err := p.FetchKeys(context.Background(), &sink, unverifiedSignature(t, `{"kid":"ec","alg":"ES256"}`), nil)
+	assert.ErrorIs(t, err, ErrKeyNotFound)
+	assert.Equal(t, int32(2), server.requests.Load())
+
+	// once the wait is over the key is fetched, by the lookup or by the retry
+	fc.Add(45 * time.Minute)
+	err = p.FetchKeys(context.Background(), &sink, unverifiedSignature(t, `{"kid":"ec","alg":"ES256"}`), nil)
+	assert.NoError(t, err)
+	assert.Equal(t, int32(3), server.requests.Load())
 }
 
 func TestProviderRefreshNotModified(t *testing.T) {

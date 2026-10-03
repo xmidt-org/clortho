@@ -33,7 +33,9 @@
 // Start returns once the refresh loops are running; it does not wait for the
 // first fetch.  Status reports each source's last outcome, so a readiness
 // check can decide when the Provider has keys.  On a refresh failure the last
-// good keys keep serving; Status exposes their age.
+// good keys keep serving; Status exposes their age.  A failed refresh is
+// retried well before the next scheduled one, and when a server asks for a
+// pause with Retry-After that is the wait used; see RefreshSource.
 //
 // Every key a source serves must carry a kid, and none may be symmetric.  A
 // key ID served by two sources is an error, not a merge: a Provider is one

@@ -6,6 +6,7 @@ package clortho
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,6 +99,79 @@ func TestLoadHTTPStatusError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, httpErr.StatusCode)
 	assert.Equal(t, server.URL, httpErr.Location)
 	assert.Equal(t, http.StatusInternalServerError, c.statusCode)
+}
+
+func TestLoadHTTPReadsRetryAfterOnA429OrA503(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(status)
+		}))
+
+		c, err := load(context.Background(), httpSource(server.URL), time.Time{})
+		server.Close()
+
+		var httpErr *HTTPError
+		require.ErrorAs(t, err, &httpErr)
+		assert.Equal(t, status, httpErr.StatusCode)
+		assert.Equal(t, 2*time.Minute, c.retryWait(time.Now()))
+	}
+}
+
+func TestLoadHTTPIgnoresRetryAfterOnAnyOtherStatus(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusNotFound, http.StatusMovedPermanently} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "120")
+			w.WriteHeader(status)
+		}))
+
+		c, err := load(context.Background(), httpSource(server.URL), time.Time{})
+		server.Close()
+
+		require.Error(t, err)
+		assert.Zero(t, c.retryWait(time.Now()), "status %d", status)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	when := time.Date(2015, time.October, 21, 7, 28, 0, 0, time.UTC)
+	tests := []struct {
+		value string
+		delay time.Duration
+		date  time.Time
+	}{
+		{value: ""},
+		{value: "30", delay: 30 * time.Second},
+		{value: " 30 ", delay: 30 * time.Second},
+		{value: "0", delay: time.Second},
+		{value: "-5"},
+		{value: "soon"},
+		{value: "1.5"},
+		{value: "9223372036854775807", delay: math.MaxInt64},
+		{value: "99999999999999999999999"},
+		{value: "Wed, 21 Oct 2015 07:28:00 GMT", date: when},
+	}
+
+	for _, test := range tests {
+		delay, date := parseRetryAfter(test.value)
+		assert.Equal(t, test.delay, delay, "value %q", test.value)
+		assert.True(t, test.date.Equal(date), "value %q", test.value)
+	}
+}
+
+func TestContentRetryWait(t *testing.T) {
+	now := time.Date(2015, time.October, 21, 7, 28, 0, 0, time.UTC)
+
+	assert.Zero(t, content{}.retryWait(now))
+	assert.Equal(t, time.Minute, content{retryDelay: time.Minute}.retryWait(now))
+	assert.Equal(t, 90*time.Second, content{retryDate: now.Add(90 * time.Second)}.retryWait(now))
+
+	// a date that has passed, or is passing, is no instruction
+	assert.Zero(t, content{retryDate: now}.retryWait(now))
+	assert.Zero(t, content{retryDate: now.Add(-time.Hour)}.retryWait(now))
+
+	// a date a moment away is still a wait of at least a second
+	assert.Equal(t, time.Second, content{retryDate: now.Add(time.Millisecond)}.retryWait(now))
 }
 
 func TestLoadHTTPDoesNotFollowRedirectsByDefault(t *testing.T) {

@@ -44,6 +44,11 @@ type sourceState struct {
 	// rate-limits early refreshes.
 	lastAttempt time.Time
 
+	// retryAt is the end of the wait the server asked for with Retry-After on
+	// the last attempt, or zero if it did not ask.  No early refresh runs
+	// before it.
+	retryAt time.Time
+
 	// lastModified is the Last-Modified of the last successful HTTP load, sent
 	// back as If-Modified-Since.
 	lastModified time.Time

@@ -53,7 +53,29 @@ type Config struct {
 	Verify VerifyConfig
 }
 
-// RefreshSource is one location that serves a JWK set or a single JWK.
+// RefreshSource is one key set source: a location that serves a JWK set or a
+// single JWK.  It is almost always a key set server, reached over http or
+// https, and otherwise a file.
+//
+// A refresh that fails leaves the ring as it was.  When the source is tried
+// again depends on why the refresh failed:
+//
+//   - The key set server asked for a pause, with a Retry-After header on a
+//     429 or 503 response.  The retry happens when the server said, even if
+//     that is sooner than MinRefreshInterval, but no later than
+//     MaxRefreshInterval.
+//   - The source answered, but clortho rejected the key set.  That happens
+//     when the set holds a symmetric key, a key with no kid, or a key ID that
+//     appears twice or that another source already supplies, and when the
+//     body is larger than MaxResponseBytes.  Asking again would return the
+//     same key set until someone corrects it at the source, so there is no
+//     early retry: the source is next read after its usual RefreshInterval.
+//     One case does get an early retry.  A source that has never loaded
+//     successfully has supplied no keys to fall back on, so it is retried
+//     after MinRefreshInterval.
+//   - Anything else went wrong, such as a timeout, a 500, a body that is not
+//     a key set, or a missing file.  The retry happens after
+//     MinRefreshInterval.
 type RefreshSource struct {
 	// URI is a file path, or a file, http, or https URI.  Required.
 	//
@@ -67,7 +89,10 @@ type RefreshSource struct {
 	RefreshInterval time.Duration
 
 	// MinRefreshInterval is the shortest time between refreshes, whatever the
-	// server says and whatever an unknown key ID asks for.  If zero,
+	// server's Cache-Control says and whatever an unknown key ID asks for.  It
+	// is also the wait before most failed refreshes are retried.  The one
+	// exception is a retry the server itself scheduled, with Retry-After on a
+	// 429 or 503, which is honored even when it is sooner.  If zero,
 	// DefaultMinRefreshInterval is used.
 	MinRefreshInterval time.Duration
 
@@ -83,7 +108,9 @@ type RefreshSource struct {
 	// percent early and ten percent late.  When the interval comes from a
 	// server TTL the late half is dropped, since the server said the content
 	// is stale after that, so 10 then means up to ten percent early.  The
-	// result is clipped to MinRefreshInterval and MaxRefreshInterval.
+	// result is clipped to MinRefreshInterval and MaxRefreshInterval.  A retry
+	// after a failed refresh drops the early half instead, so 10 then means up
+	// to ten percent late.
 	//
 	// Valid values are greater than zero and less than one hundred; anything
 	// else, including zero, gets DefaultJitterPercentage.  Jitter cannot be
@@ -112,7 +139,9 @@ type VerifyConfig struct {
 	// scheduled refresh.  The early refresh is rate-limited by each source's
 	// MinRefreshInterval; a lookup that arrives inside that window fails
 	// immediately with ErrKeyNotFound, so a flood of unknown key IDs costs at
-	// most one request per source per MinRefreshInterval.
+	// most one request per source per MinRefreshInterval.  A source that
+	// answered 429 or 503 with a Retry-After is also left alone until that wait
+	// has passed.
 	//
 	// Off, which is the default, an unknown key ID fails with ErrKeyNotFound
 	// and no request is made: a token can never cause the Provider to contact
