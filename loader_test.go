@@ -4,6 +4,7 @@
 package clortho
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -172,6 +173,30 @@ func TestContentRetryWait(t *testing.T) {
 
 	// a date a moment away is still a wait of at least a second
 	assert.Equal(t, time.Second, content{retryDate: now.Add(time.Millisecond)}.retryWait(now))
+}
+
+func TestLoadHTTPDefaultLimitAllowsABodyExactlyAtTheLimit(t *testing.T) {
+	body := bytes.Repeat([]byte("k"), int(DefaultMaxResponseBytes))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	c, err := load(context.Background(), httpSource(server.URL), time.Time{})
+	require.NoError(t, err)
+	assert.Len(t, c.data, len(body))
+}
+
+func TestLoadHTTPDefaultLimitRejectsABodyOneByteOver(t *testing.T) {
+	body := bytes.Repeat([]byte("k"), int(DefaultMaxResponseBytes)+1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	c, err := load(context.Background(), httpSource(server.URL), time.Time{})
+	assert.ErrorIs(t, err, ErrResponseTooLarge)
+	assert.Nil(t, c.data)
 }
 
 func TestLoadHTTPDoesNotFollowRedirectsByDefault(t *testing.T) {

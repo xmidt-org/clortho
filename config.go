@@ -33,8 +33,10 @@ const (
 	DefaultHTTPTimeout = 30 * time.Second
 
 	// DefaultMaxResponseBytes is the largest response body read from an http
-	// or https source when RefreshSource.MaxResponseBytes is zero.
-	DefaultMaxResponseBytes int64 = 25 * 1024
+	// or https source when RefreshSource.MaxResponseBytes is zero.  At one
+	// mebibyte it is far larger than any key set in ordinary use, so that a
+	// set which grows during a rotation does not start failing refreshes.
+	DefaultMaxResponseBytes int64 = 1024 * 1024
 )
 
 // Config is the only way to configure a Provider.  It is a plain struct with
