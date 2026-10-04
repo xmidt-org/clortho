@@ -102,7 +102,7 @@ func TestProvideVerifiesATokenOnceStarted(t *testing.T) {
 
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL}}}),
+		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Populate(&p, &kp),
 	)
 	require.NoError(t, app.Err())
@@ -128,7 +128,7 @@ func TestProvideStopsTheProviderWithTheApplication(t *testing.T) {
 	var p *clortho.Provider
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL}}}),
+		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Populate(&p),
 	)
 	app.RequireStart()
@@ -145,7 +145,7 @@ func TestProvideLogsRefreshes(t *testing.T) {
 	var p *clortho.Provider
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL}}}),
+		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Supply(zap.New(core)),
 		fx.Populate(&p),
 	)
@@ -166,7 +166,7 @@ func TestProvideRecordsMetrics(t *testing.T) {
 	var p *clortho.Provider
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL}}}),
+		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Supply(factory),
 		fx.Populate(&p),
 	)
@@ -197,7 +197,7 @@ func TestProvideFailsWhenMetricsCollide(t *testing.T) {
 	var p *clortho.Provider
 	app := fx.New(fx.NopLogger,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL}}}),
+		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Supply(factory),
 		fx.Populate(&p),
 	)

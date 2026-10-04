@@ -32,20 +32,70 @@ func TestNewRejectsAnUnsupportedScheme(t *testing.T) {
 
 func TestNewRejectsADuplicateSource(t *testing.T) {
 	p, err := New(Config{Sources: []RefreshSource{
-		{URI: "https://keys.example.com/jwks"},
-		{URI: "https://keys.example.com/jwks"},
+		{URI: "https://keys.example.com/jwks", Client: testClient()},
+		{URI: "https://keys.example.com/jwks", Client: testClient()},
 	}})
-	assert.Error(t, err)
+	assert.ErrorContains(t, err, "duplicate source URI")
+	assert.NotErrorIs(t, err, ErrMissingClient)
 	assert.Nil(t, p)
+}
+
+func TestNewRequiresAClientForAnHTTPSource(t *testing.T) {
+	for _, uri := range []string{"http://keys.example.com/jwks", "https://keys.example.com/jwks"} {
+		p, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
+		assert.ErrorIs(t, err, ErrMissingClient, uri)
+		assert.ErrorContains(t, err, uri)
+		assert.Nil(t, p)
+	}
+}
+
+func TestNewRedactsACredentialedURIWhenTheClientIsMissing(t *testing.T) {
+	uri := "https://user:" + "hunter2" + "@keys.example.com/jwks"
+	_, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
+	require.ErrorIs(t, err, ErrMissingClient)
+	assert.NotContains(t, err.Error(), "hunter2")
+	assert.Contains(t, err.Error(), "user:xxxxx@")
+}
+
+func TestNewRejectsAClientOnAFileSource(t *testing.T) {
+	for _, uri := range []string{"file:///etc/keys.json", "/etc/other-keys.json"} {
+		p, err := New(Config{Sources: []RefreshSource{{URI: uri, Client: testClient()}}})
+		assert.ErrorIs(t, err, ErrUnusedClient, uri)
+		assert.ErrorContains(t, err, uri)
+		assert.Nil(t, p)
+	}
+}
+
+func TestNewCatchesAnHTTPURIWrittenWithoutItsScheme(t *testing.T) {
+	// with no scheme this reads as a file path.  the client that came with it
+	// is what gives the mistake away, at New instead of at the first refresh.
+	p, err := New(Config{Sources: []RefreshSource{{URI: "keys.example.com/jwks", Client: testClient()}}})
+	assert.ErrorIs(t, err, ErrUnusedClient)
+	assert.Nil(t, p)
+}
+
+func TestNewNeedsNoClientForAFileSource(t *testing.T) {
+	p, err := New(Config{Sources: []RefreshSource{
+		{URI: "file:///etc/keys.json"},
+		{URI: "/etc/other-keys.json"},
+	}})
+	require.NoError(t, err)
+	require.NotNil(t, p)
+
+	// and none is made up for it
+	assert.Nil(t, p.sources[0].Client)
+	assert.Nil(t, p.sources[1].Client)
 }
 
 func TestNewReportsEveryProblemAtOnce(t *testing.T) {
 	_, err := New(Config{Sources: []RefreshSource{
 		{URI: "ftp://keys.example.com/jwks"},
 		{},
+		{URI: "https://keys.example.com/other"},
 	}})
 	assert.ErrorIs(t, err, ErrUnsupportedScheme)
 	assert.ErrorContains(t, err, "source 1: a URI is required")
+	assert.ErrorIs(t, err, ErrMissingClient)
 }
 
 func TestNewRedactsACredentialedURIInErrors(t *testing.T) {
@@ -60,8 +110,8 @@ func TestNewAcceptsFileHTTPAndHTTPS(t *testing.T) {
 	p, err := New(Config{Sources: []RefreshSource{
 		{URI: "file:///etc/keys.json"},
 		{URI: "/etc/other-keys.json"},
-		{URI: "http://keys.example.com/jwks"},
-		{URI: "https://keys.example.com/jwks"},
+		{URI: "http://keys.example.com/jwks", Client: testClient()},
+		{URI: "https://keys.example.com/jwks", Client: testClient()},
 	}})
 	require.NoError(t, err)
 	require.NotNil(t, p)
@@ -75,7 +125,8 @@ func TestNewAcceptsFileHTTPAndHTTPS(t *testing.T) {
 }
 
 func TestNewFillsDefaults(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}})
+	client := &http.Client{}
+	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", Client: client}}})
 	require.NoError(t, err)
 
 	src := p.sources[0]
@@ -84,10 +135,10 @@ func TestNewFillsDefaults(t *testing.T) {
 	assert.Equal(t, DefaultMaxRefreshInterval, src.MaxRefreshInterval)
 	assert.Equal(t, DefaultJitterPercentage, src.JitterPercentage)
 	assert.Equal(t, DefaultMaxResponseBytes, src.MaxResponseBytes)
-	require.NotNil(t, src.Client)
-	assert.Equal(t, DefaultHTTPTimeout, src.Client.Timeout)
-	require.NotNil(t, src.Client.CheckRedirect)
-	assert.ErrorIs(t, src.Client.CheckRedirect(nil, nil), http.ErrUseLastResponse)
+
+	// the client is the caller's, as given: nothing about it is filled in
+	assert.Same(t, client, src.Client)
+	assert.Equal(t, http.Client{}, *src.Client)
 }
 
 func TestNewKeepsExplicitValues(t *testing.T) {
@@ -113,7 +164,7 @@ func TestNewKeepsExplicitValues(t *testing.T) {
 }
 
 func TestNewReplacesAnOutOfRangeJitter(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", JitterPercentage: 150}}})
+	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", Client: testClient(), JitterPercentage: 150}}})
 	require.NoError(t, err)
 	assert.Equal(t, DefaultJitterPercentage, p.sources[0].JitterPercentage)
 }
@@ -121,6 +172,7 @@ func TestNewReplacesAnOutOfRangeJitter(t *testing.T) {
 func TestNewRaisesAMaxBelowTheMin(t *testing.T) {
 	p, err := New(Config{Sources: []RefreshSource{{
 		URI:                "https://keys.example.com/jwks",
+		Client:             testClient(),
 		MinRefreshInterval: time.Hour,
 		MaxRefreshInterval: time.Minute,
 	}}})
@@ -129,7 +181,7 @@ func TestNewRaisesAMaxBelowTheMin(t *testing.T) {
 }
 
 func TestNewDoesNotShareTheCallersSlice(t *testing.T) {
-	sources := []RefreshSource{{URI: "https://keys.example.com/jwks"}}
+	sources := []RefreshSource{{URI: "https://keys.example.com/jwks", Client: testClient()}}
 	p, err := New(Config{Sources: sources})
 	require.NoError(t, err)
 

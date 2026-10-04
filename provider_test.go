@@ -190,7 +190,7 @@ func (tc *testClock) armedFor(t *testing.T) time.Duration {
 // an event listener attached, and starts it.  The first refresh event of each
 // source is consumed so that the ring is populated when this returns.
 func testProvider(t *testing.T, cfg Config) (*Provider, *testClock, *eventListener) {
-	p, err := New(cfg)
+	p, err := New(withTestClients(cfg))
 	require.NoError(t, err)
 
 	fc := newTestClock()
@@ -252,7 +252,7 @@ func TestProviderStartRefreshesEverySource(t *testing.T) {
 }
 
 func TestProviderStatusBeforeStart(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}}))
 	require.NoError(t, err)
 
 	status := p.Status()
@@ -273,7 +273,7 @@ func TestProviderStartTwice(t *testing.T) {
 }
 
 func TestProviderStopWhenNotStarted(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}}))
 	require.NoError(t, err)
 	assert.ErrorIs(t, p.Stop(context.Background()), ErrNotStarted)
 }
@@ -347,7 +347,7 @@ func TestProviderRefreshEventDescribesTheFirstLoad(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "b", nil), publicJWK(t, ecKey, "a", nil))
 
-	p, err := New(Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: server.URL}}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -611,7 +611,7 @@ func TestProviderRefreshEventCarriesTheKeySetSize(t *testing.T) {
 	server.serveRaw(first)
 
 	// testProvider would consume the first event, which is wanted here
-	p, err := New(Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{retrySource(server.URL)}}))
 	require.NoError(t, err)
 	fc := newTestClock()
 	p.clock = fc
@@ -649,7 +649,7 @@ func TestProviderRefreshEventHasNoKeySetSizeBeforeTheFirstLoad(t *testing.T) {
 	server := newKeyServer(t)
 	server.fail(http.StatusInternalServerError)
 
-	p, err := New(Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{retrySource(server.URL)}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -704,7 +704,7 @@ func TestProviderRejectsAKeyIDAnotherSourceSupplies(t *testing.T) {
 	second := newKeyServer(t, publicJWK(t, ecKey, "shared", nil), publicJWK(t, ecKey, "only-second", nil))
 	second.gate = make(chan struct{})
 
-	p, err := New(Config{Sources: []RefreshSource{{URI: first.URL}, {URI: second.URL}}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: first.URL}, {URI: second.URL}}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -751,7 +751,7 @@ func TestProviderRedactsCredentialsInEventsAndStatus(t *testing.T) {
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
 	uri := "http://user:hunter2@" + server.Listener.Addr().String() + "/"
 
-	p, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: uri}}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -768,7 +768,7 @@ func TestProviderCancelListener(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
 
-	p, err := New(Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: server.URL}}}))
 	require.NoError(t, err)
 	fc := newTestClock()
 	p.clock = fc
@@ -961,10 +961,10 @@ func TestProviderRefreshOnUnknownKeyIDStillMisses(t *testing.T) {
 }
 
 func TestProviderRefreshOnUnknownKeyIDWhenNotRunning(t *testing.T) {
-	p, err := New(Config{
+	p, err := New(withTestClients(Config{
 		Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}},
 		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
-	})
+	}))
 	require.NoError(t, err)
 
 	var sink recordingSink

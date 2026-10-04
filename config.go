@@ -28,10 +28,6 @@ const (
 	// RefreshSource.JitterPercentage is zero or out of range.
 	DefaultJitterPercentage = 10.0
 
-	// DefaultHTTPTimeout is the timeout of the client used for an http or https
-	// source when RefreshSource.Client is nil.
-	DefaultHTTPTimeout = 30 * time.Second
-
 	// DefaultMaxResponseBytes is the largest response body read from an http
 	// or https source when RefreshSource.MaxResponseBytes is zero.  At one
 	// mebibyte it is far larger than any key set in ordinary use, so that a
@@ -120,10 +116,21 @@ type RefreshSource struct {
 	// from polling the key server in lockstep.
 	JitterPercentage float64
 
-	// Client makes the requests for an http or https URI.  It owns timeout,
-	// redirects, TLS, proxies, and any authorization its transport adds.  If
-	// nil, a default client is used that has DefaultHTTPTimeout and does not
-	// follow redirects.  Ignored for a file source.
+	// Client makes the requests for an http or https URI, and is required for
+	// one: New fails with ErrMissingClient without it.
+	//
+	// clortho uses the client exactly as given.  The client owns the timeout,
+	// redirects, TLS, proxies, and any authorization its transport adds, and
+	// clortho neither adds to those nor overrides them.  What the client leaves
+	// out is therefore left out: a client with no timeout lets a server that
+	// stops answering stall the refresh until Stop, and a client that follows
+	// redirects lets the server, rather than the URI configured here, decide
+	// where key material comes from.  The example on New shows a client suited
+	// to fetching keys.
+	//
+	// A file source takes no client, and New fails with ErrUnusedClient if it
+	// is given one.  A client on a file source nearly always means an http or
+	// https URI was written without its scheme, which reads as a file path.
 	Client *http.Client
 
 	// MaxResponseBytes caps the body read from an http or https URI.  A larger
@@ -148,12 +155,11 @@ type VerifyConfig struct {
 	// The wait has no limit of its own.  A lookup that triggers an early
 	// refresh, or that arrives while a refresh is already running, waits until
 	// every source has answered.  That can take as long as the slowest source's
-	// Client allows: DefaultHTTPTimeout for the default client, and without
-	// limit for a client that has no timeout.  The request being verified is
-	// held for all of that time.  The lookup stops waiting sooner only when the
-	// context jwx was given, and passes to FetchKeys, ends.  A service that
-	// needs a tighter bound puts a deadline on that context.  A refresh already
-	// under way carries on either way.
+	// Client allows, and is without limit for a client that has no timeout.
+	// The request being verified is held for all of that time.  The lookup
+	// stops waiting sooner only when the context jwx was given, and passes to
+	// FetchKeys, ends.  A service that needs a tighter bound puts a deadline on
+	// that context.  A refresh already under way carries on either way.
 	//
 	// Off, which is the default, an unknown key ID fails with ErrKeyNotFound
 	// and no request is made: a token can never cause the Provider to contact
@@ -199,23 +205,9 @@ func isHTTP(uri string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https")
 }
 
-// newDefaultHTTPClient returns the client used for an http or https source
-// whose Client is nil.  It has DefaultHTTPTimeout and does not follow
-// redirects: a redirect lets the server, rather than the configured location,
-// decide where key material comes from, so a 3xx surfaces as an HTTPError.
-// It shares the process's default transport, so connection pooling is
-// unaffected.
-func newDefaultHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: DefaultHTTPTimeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-}
-
-// validate checks the source's URI.  index identifies the source in errors
-// where the URI itself cannot be shown.
+// validate checks the source's URI, and that the source has a client exactly
+// when it is reached over HTTP.  index identifies the source in errors where
+// the URI itself cannot be shown.
 func (rs RefreshSource) validate(index int) error {
 	if rs.URI == "" {
 		return fmt.Errorf("source %d: a URI is required", index)
@@ -229,7 +221,22 @@ func (rs RefreshSource) validate(index int) error {
 	}
 
 	switch u.Scheme {
-	case "", "file", "http", "https":
+	case "", "file":
+		// a client here would never be used.  the likely cause is a URI such as
+		// keys.example.com/jwks, which has no scheme and so reads as a path.
+		if rs.Client != nil {
+			return fmt.Errorf("%w: %q", ErrUnusedClient, redactURI(rs.URI))
+		}
+
+		return nil
+
+	case "http", "https":
+		// there is no default client.  the client decides the timeout, redirects,
+		// TLS, and proxies, and guessing at those is worse than asking for them.
+		if rs.Client == nil {
+			return fmt.Errorf("%w: %q", ErrMissingClient, redactURI(rs.URI))
+		}
+
 		return nil
 
 	default:
@@ -258,10 +265,6 @@ func (rs RefreshSource) withDefaults() RefreshSource {
 
 	if rs.JitterPercentage <= 0.0 || rs.JitterPercentage >= 100.0 {
 		rs.JitterPercentage = DefaultJitterPercentage
-	}
-
-	if rs.Client == nil {
-		rs.Client = newDefaultHTTPClient()
 	}
 
 	if rs.MaxResponseBytes <= 0 {

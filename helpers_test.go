@@ -9,8 +9,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/stretchr/testify/require"
@@ -61,4 +63,26 @@ func jwkSetJSON(t *testing.T, keys ...jwk.Key) []byte {
 	data, err := json.Marshal(set)
 	require.NoError(t, err)
 	return data
+}
+
+// testClient returns a client for the http sources in tests.  New supplies no
+// default, so every http or https source has to be given one.
+func testClient() *http.Client {
+	return &http.Client{Timeout: 30 * time.Second}
+}
+
+// withTestClients returns cfg with the test client set on every http or https
+// source that has none, so that a test about something else need not spell
+// one out.  Tests of the client requirement itself call New directly.
+func withTestClients(cfg Config) Config {
+	sources := make([]RefreshSource, len(cfg.Sources))
+	copy(sources, cfg.Sources)
+	for i := range sources {
+		if sources[i].Client == nil && isHTTP(sources[i].URI) {
+			sources[i].Client = testClient()
+		}
+	}
+
+	cfg.Sources = sources
+	return cfg
 }

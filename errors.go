@@ -17,6 +17,17 @@ var (
 	// cannot be parsed at all, since no supported scheme can be read from it.
 	ErrUnsupportedScheme = errors.New("source URI scheme is not supported; use file, http, or https")
 
+	// ErrMissingClient is returned by New when an http or https source has no
+	// Client.  clortho does not supply one: the client decides the timeout,
+	// redirects, TLS, and proxies, and those are the caller's to choose.
+	ErrMissingClient = errors.New("an http or https source requires a Client")
+
+	// ErrUnusedClient is returned by New when a file source has a Client, which
+	// it would never use.  The usual cause is an http or https URI written
+	// without its scheme, such as keys.example.com/jwks, which reads as a file
+	// path.
+	ErrUnusedClient = errors.New("a file source does not use a Client")
+
 	// ErrAlreadyStarted is returned by Start when the Provider is already running.
 	ErrAlreadyStarted = errors.New("the provider has already been started")
 

@@ -21,7 +21,7 @@ import (
 
 // httpSource returns a normalized source pointing at a test server.
 func httpSource(uri string) RefreshSource {
-	return RefreshSource{URI: uri}.withDefaults()
+	return RefreshSource{URI: uri, Client: testClient()}.withDefaults()
 }
 
 func TestLoadHTTPOK(t *testing.T) {
@@ -199,19 +199,50 @@ func TestLoadHTTPDefaultLimitRejectsABodyOneByteOver(t *testing.T) {
 	assert.Nil(t, c.data)
 }
 
-func TestLoadHTTPDoesNotFollowRedirectsByDefault(t *testing.T) {
+// the three tests below are one claim: the client is used exactly as given.
+// whether a redirect is followed, and how long a request may take, are the
+// client's to decide, and clortho neither adds to nor overrides them.
+
+func TestLoadHTTPReportsARedirectTheClientDoesNotFollow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://elsewhere.invalid/keys", http.StatusFound)
 	}))
 	defer server.Close()
 
-	_, err := load(context.Background(), httpSource(server.URL), time.Time{})
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+
+	src := RefreshSource{URI: server.URL, Client: client}.withDefaults()
+	_, err := load(context.Background(), src, time.Time{})
 	var httpErr *HTTPError
 	require.ErrorAs(t, err, &httpErr)
 	assert.Equal(t, http.StatusFound, httpErr.StatusCode)
 }
 
-func TestLoadHTTPUsesTheSourcesClient(t *testing.T) {
+func TestLoadHTTPHonorsTheClientsTimeout(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+
+	src := RefreshSource{URI: server.URL, Client: &http.Client{Timeout: 50 * time.Millisecond}}.withDefaults()
+	start := time.Now()
+	_, err := load(context.Background(), src, time.Time{})
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 5*time.Second)
+
+	var timeout interface{ Timeout() bool }
+	require.ErrorAs(t, err, &timeout)
+	assert.True(t, timeout.Timeout())
+}
+
+func TestLoadHTTPFollowsARedirectWhenTheClientDoes(t *testing.T) {
 	var followed bool
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		followed = true
@@ -236,7 +267,7 @@ func TestLoadHTTPTooLarge(t *testing.T) {
 	}))
 	defer server.Close()
 
-	src := RefreshSource{URI: server.URL, MaxResponseBytes: 10}.withDefaults()
+	src := RefreshSource{URI: server.URL, Client: testClient(), MaxResponseBytes: 10}.withDefaults()
 	c, err := load(context.Background(), src, time.Time{})
 	assert.ErrorIs(t, err, ErrResponseTooLarge)
 	assert.Equal(t, http.StatusOK, c.statusCode)
@@ -248,7 +279,7 @@ func TestLoadHTTPExactlyAtTheLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	src := RefreshSource{URI: server.URL, MaxResponseBytes: 11}.withDefaults()
+	src := RefreshSource{URI: server.URL, Client: testClient(), MaxResponseBytes: 11}.withDefaults()
 	c, err := load(context.Background(), src, time.Time{})
 	require.NoError(t, err)
 	assert.Equal(t, `{"keys":[]}`, string(c.data))

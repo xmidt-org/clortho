@@ -13,7 +13,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/stretchr/testify/assert"
@@ -68,6 +70,10 @@ func TestReason(t *testing.T) {
 // its first refresh, so that reason is checked against what clortho actually
 // reports and not only against errors built by hand.
 func refreshError(t *testing.T, source clortho.RefreshSource) error {
+	// only a source reached over http takes a client
+	if strings.HasPrefix(source.URI, "http") {
+		source.Client = &http.Client{Timeout: 5 * time.Second}
+	}
 	p, err := clortho.New(clortho.Config{Sources: []clortho.RefreshSource{source}})
 	require.NoError(t, err)
 

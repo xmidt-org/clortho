@@ -13,10 +13,15 @@
 //
 // Configuration is a plain Config struct with no options and no struct tags.
 // A service unmarshals its own settings, maps them onto a Config, and hands
-// each source the *http.Client it wants:
+// each http or https source the *http.Client to reach it with.  That client
+// is required, and clortho uses it exactly as given; the example on New shows
+// one suited to fetching keys.
 //
 //	p, err := clortho.New(clortho.Config{
-//		Sources: []clortho.RefreshSource{{URI: "https://issuer.example.com/keys"}},
+//		Sources: []clortho.RefreshSource{{
+//			URI:    "https://issuer.example.com/keys",
+//			Client: client,
+//		}},
 //	})
 //	if err != nil {
 //		return err
