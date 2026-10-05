@@ -4,7 +4,8 @@
 // Package clortho supplies the keys a service needs to verify JWS signatures,
 // such as those on JWTs, as a jws.KeyProvider for github.com/lestrrat-go/jwx/v4.
 //
-// It makes two kinds of provider, for two kinds of key server.
+// It makes three kinds of provider, for three ways a service can come by its
+// keys.
 //
 // A KeySetProvider is for a server that publishes its keys as a set.  It
 // polls each configured source for its complete key set, a JWK set or a single
@@ -19,18 +20,22 @@
 // a token can make it send a request.  PerKeyConfig bounds what that can cost,
 // and a service that can list its key IDs should.
 //
+// A FixedKeyProvider is for keys written into the service's own
+// configuration, as PEM or as JWKs.  It never sends a request at all.
+//
 // Prefer a KeySetProvider wherever the server offers a key set.  A service
-// that needs several providers, of either kind, passes each one to jwx, which
-// asks them in the order given.  The package example shows both kinds used
-// together.
+// that needs several providers, of any kind, passes each one to jwx, which
+// asks them in the order given.  The package example shows all three kinds
+// used together.
 //
 // # Configuration
 //
 // Each kind is configured by a plain struct with no options and no struct
-// tags: KeySetConfig and PerKeyConfig.  A service unmarshals its own settings,
-// maps them onto one of these, and hands over the *http.Client to reach the
-// server with.  That client is required, and clortho uses it exactly as given;
-// the example on NewKeySetProvider shows one suited to fetching keys.
+// tags: KeySetConfig, PerKeyConfig, and FixedKeyConfig.  A service unmarshals
+// its own settings and maps them onto one of these.  For the two kinds that
+// reach a server, it also hands over the *http.Client to reach it with.  That
+// client is required, and clortho uses it exactly as given; the example on
+// NewKeySetProvider shows one suited to fetching keys.
 //
 //	p, err := clortho.NewKeySetProvider(clortho.KeySetConfig{
 //		Sources: []clortho.RefreshSource{{
@@ -74,6 +79,13 @@
 // key whose time is up keeps serving while the server cannot be reached, and
 // is dropped as soon as the server says it is gone.
 //
+// # A FixedKeyProvider in service
+//
+// A FixedKeyProvider is complete as soon as it is built.  It has nothing to
+// start, stop, or watch, and what it holds changes only when the service's
+// configuration does.  Every key is given its key ID in the configuration,
+// since a PEM has nowhere to carry one.
+//
 // # Every provider
 //
 // No key may be symmetric, and a private key is reduced to its public half.
@@ -81,6 +93,6 @@
 // match the token; VerifyConfig turns either check off.
 //
 // Errors carry sentinels for errors.Is.  clorthozap and clorthometrics log and
-// count what both kinds of provider do, and clorthofx wires a KeySetProvider
-// into a go.uber.org/fx application.
+// count what the two kinds of provider that reach a server do, and clorthofx
+// wires a KeySetProvider into a go.uber.org/fx application.
 package clortho

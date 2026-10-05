@@ -6,29 +6,88 @@ package clortho
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/lestrrat-go/jwx/v4/jwa"
 	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 // parseKey parses the single JWK a server returned when asked for one key by
-// its key ID.  The key must not be symmetric, and is reduced to its public
-// form.  It takes the key ID that was asked for: a server that serves one key
-// per request need not repeat the ID in the key, and themis does not.  A key
-// that does carry an ID must carry the one asked for, since anything else
-// means the server answered a different question.
+// its key ID, and adopts it under that key ID.
 func parseKey(data []byte, keyID string) (jwk.Key, error) {
 	k, err := jwk.ParseKey(data)
 	if err != nil {
 		return nil, err
 	}
 
+	return adoptKey(k, keyID)
+}
+
+// parseFixedKey parses a key written into configuration, as PEM or as a JWK,
+// and adopts it under the key ID the configuration gives it.  The form is
+// told from how the text starts, once the white space a configuration file
+// tends to wrap around a block of text is gone.
+//
+// The text is never quoted in an error.  It ought to be a public key, but a
+// mistake could put a private one here, and an error is likely to be logged.
+func parseFixedKey(text, keyID string) (jwk.Key, error) {
+	text = strings.TrimSpace(text)
+
+	var (
+		k   jwk.Key
+		err error
+	)
+
+	switch {
+	case text == "":
+		return nil, fmt.Errorf("%w: it is empty", ErrInvalidFixedKey)
+
+	case strings.HasPrefix(text, "{"):
+		k, err = jwk.ParseKey([]byte(text))
+
+	case strings.HasPrefix(text, pemBegin):
+		// only the first block would be read, and the rest silently ignored
+		if strings.Count(text, pemBegin) > 1 {
+			return nil, fmt.Errorf("%w: it holds more than one PEM block", ErrInvalidFixedKey)
+		}
+
+		// a block pasted into a configuration file or a Go string is often
+		// indented, and PEM does not allow that
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimSpace(line)
+		}
+
+		k, err = jwk.ParseKey([]byte(strings.Join(lines, "\n")), jwk.WithX509(true))
+
+	default:
+		return nil, fmt.Errorf("%w: it is neither PEM nor a JWK", ErrInvalidFixedKey)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidFixedKey, err)
+	}
+
+	return adoptKey(k, keyID)
+}
+
+// pemBegin is how every PEM block starts.
+const pemBegin = "-----BEGIN"
+
+// adoptKey applies the rules every key must meet before a provider will hold
+// it, and gives the key the ID it is to be known by.  The key must not be
+// symmetric, and is reduced to its public form.  A key need not say what its
+// own key ID is: a server that serves one key per request need not repeat the
+// ID in the key, and a PEM has nowhere to put one.  A key that does carry an
+// ID must carry the one it is being adopted under, since anything else means
+// it is not the key that was meant.
+func adoptKey(k jwk.Key, keyID string) (jwk.Key, error) {
 	if k.KeyType() == jwa.OctetSeq() {
 		return nil, fmt.Errorf("%w: %q", ErrSymmetricKey, keyID)
 	}
 
 	if kid, ok := k.KeyID(); ok && kid != "" && kid != keyID {
-		return nil, fmt.Errorf("%w: asked for %q, the key says %q", ErrKeyIDMismatch, keyID, kid)
+		return nil, fmt.Errorf("%w: wanted %q, the key says %q", ErrKeyIDMismatch, keyID, kid)
 	}
 
 	pub, err := k.PublicKey()

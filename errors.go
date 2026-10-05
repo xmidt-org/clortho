@@ -49,9 +49,20 @@ var (
 	// provider could never fetch anything.
 	ErrNoAllowedKeyIDs = errors.New("AllowedKeyIDsOnly requires at least one allowed key ID")
 
-	// ErrKeyIDMismatch is a fetch error: the key a server returned carries a
-	// key ID other than the one it was asked for.
+	// ErrKeyIDMismatch marks a key that carries a key ID other than the one it
+	// was wanted under.  It is a fetch error when a server returns such a key
+	// for the key ID it was asked for, and NewFixedKeyProvider returns it when
+	// a fixed key written as a JWK carries a kid other than its FixedKey.KeyID.
 	ErrKeyIDMismatch = errors.New("the key is not the one asked for")
+
+	// ErrNoFixedKeys is returned by NewFixedKeyProvider when the config has no
+	// keys.
+	ErrNoFixedKeys = errors.New("at least one fixed key is required")
+
+	// ErrInvalidFixedKey is returned by NewFixedKeyProvider when a fixed key's
+	// text cannot be used: it is empty, it is neither PEM nor a JWK, it holds
+	// more than one PEM block, or it does not parse.
+	ErrInvalidFixedKey = errors.New("fixed key is not usable")
 
 	// ErrAlreadyStarted is returned by Start when the KeySetProvider is already
 	// running.
@@ -63,13 +74,17 @@ var (
 	// ErrDuplicateKeyID is a refresh error: a source served a key ID that is
 	// already on the ring from another source, or served the same key ID twice.
 	// A KeySetProvider is one map, so a key ID names exactly one key; a
-	// deployment that needs separate key spaces builds separate Providers.  The
-	// refresh that would introduce the duplicate fails and leaves the ring
-	// untouched.
+	// deployment that needs separate key spaces builds separate
+	// KeySetProviders.  The refresh that would introduce the duplicate fails
+	// and leaves the ring untouched.
+	//
+	// NewFixedKeyProvider returns it when two fixed keys are given the same
+	// KeyID.
 	ErrDuplicateKeyID = errors.New("key ID is already supplied by another source")
 
 	// ErrMissingKeyID is returned by FetchKeys when the protected header has no
 	// kid, and is a refresh error when a source serves a key with no kid.
+	// NewFixedKeyProvider returns it for a fixed key with no KeyID.
 	ErrMissingKeyID = errors.New("no key ID")
 
 	// ErrSymmetricKey is a refresh error: a source served a symmetric (oct)
