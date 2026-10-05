@@ -20,6 +20,7 @@ const (
 	reasonSymmetricKey   = "symmetric_key"
 	reasonMissingKeyID   = "missing_key_id"
 	reasonDuplicateKeyID = "duplicate_key_id"
+	reasonKeyIDMismatch  = "key_id_mismatch"
 	reasonHTTPPrefix     = "http_"
 	reasonHTTPOther      = "http_other"
 	reasonUnreachable    = "unreachable"
@@ -28,7 +29,8 @@ const (
 	reasonOther          = "other"
 )
 
-// reason classifies the error from a failed refresh as one ReasonLabel value.
+// reason classifies the error from a failed refresh or fetch as one
+// ReasonLabel value.
 //
 // A key set can be rejected for several faults at once.  The first one in the
 // order below is the one reported, so the same set always gets the same
@@ -52,6 +54,9 @@ func reason(err error) string {
 
 	case errors.Is(err, clortho.ErrDuplicateKeyID):
 		return reasonDuplicateKeyID
+
+	case errors.Is(err, clortho.ErrKeyIDMismatch):
+		return reasonKeyIDMismatch
 
 	case errors.As(err, &httpErr):
 		return httpReason(httpErr.StatusCode)

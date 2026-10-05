@@ -11,6 +11,38 @@ import (
 	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
+// parseKey parses the single JWK a server returned when asked for one key by
+// its key ID.  The key must not be symmetric, and is reduced to its public
+// form.  It takes the key ID that was asked for: a server that serves one key
+// per request need not repeat the ID in the key, and themis does not.  A key
+// that does carry an ID must carry the one asked for, since anything else
+// means the server answered a different question.
+func parseKey(data []byte, keyID string) (jwk.Key, error) {
+	k, err := jwk.ParseKey(data)
+	if err != nil {
+		return nil, err
+	}
+
+	if k.KeyType() == jwa.OctetSeq() {
+		return nil, fmt.Errorf("%w: %q", ErrSymmetricKey, keyID)
+	}
+
+	if kid, ok := k.KeyID(); ok && kid != "" && kid != keyID {
+		return nil, fmt.Errorf("%w: asked for %q, the key says %q", ErrKeyIDMismatch, keyID, kid)
+	}
+
+	pub, err := k.PublicKey()
+	if err != nil {
+		return nil, fmt.Errorf("key %q: %w", keyID, err)
+	}
+
+	if err := pub.Set(jwk.KeyIDKey, keyID); err != nil {
+		return nil, fmt.Errorf("key %q: %w", keyID, err)
+	}
+
+	return pub, nil
+}
+
 // parseKeys parses a JWK set or a single JWK into the keys the ring will hold.
 // Every key must carry a kid and must not be symmetric, and no kid may appear
 // twice.  Each key is reduced to its public form, so that a private key which

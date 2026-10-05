@@ -113,3 +113,54 @@ func TestOnRefreshEventDisabled(t *testing.T) {
 	l.OnRefreshEvent(clortho.RefreshEvent{URI: "https://keys.example.com/jwks"})
 	assert.Zero(t, logs.Len())
 }
+
+func TestOnFetchEventSuccess(t *testing.T) {
+	logger, logs := observed(zapcore.InfoLevel)
+	l, err := NewListener(WithLogger(logger))
+	require.NoError(t, err)
+
+	l.OnFetchEvent(clortho.FetchEvent{URI: "https://keys.example.com/keys/{keyID}", KeyID: "docker"})
+
+	require.Equal(t, 1, logs.Len())
+	entry := logs.All()[0]
+	assert.Equal(t, zapcore.InfoLevel, entry.Level)
+	assert.Equal(t, "key fetch", entry.Message)
+	f := fields(entry)
+	assert.Equal(t, "https://keys.example.com/keys/{keyID}", f["uri"])
+	assert.Equal(t, "docker", f["keyID"])
+	assert.Nil(t, f["error"])
+}
+
+func TestOnFetchEventCustomLevel(t *testing.T) {
+	logger, logs := observed(zapcore.DebugLevel)
+	l, err := NewListener(WithLogger(logger), WithLevel(zapcore.DebugLevel))
+	require.NoError(t, err)
+
+	l.OnFetchEvent(clortho.FetchEvent{URI: "https://keys.example.com/keys/{keyID}", KeyID: "docker"})
+
+	require.Equal(t, 1, logs.Len())
+	assert.Equal(t, zapcore.DebugLevel, logs.All()[0].Level)
+}
+
+func TestOnFetchEventError(t *testing.T) {
+	logger, logs := observed(zapcore.InfoLevel)
+	l, err := NewListener(WithLogger(logger), WithLevel(zapcore.DebugLevel))
+	require.NoError(t, err)
+
+	expected := errors.New("expected")
+	l.OnFetchEvent(clortho.FetchEvent{URI: "https://keys.example.com/keys/{keyID}", KeyID: "docker", Err: expected})
+
+	require.Equal(t, 1, logs.Len())
+	entry := logs.All()[0]
+	assert.Equal(t, zapcore.ErrorLevel, entry.Level, "a failure is an error whatever level was chosen")
+	assert.Equal(t, "expected", fields(entry)["error"])
+}
+
+func TestOnFetchEventDisabled(t *testing.T) {
+	logger, logs := observed(zapcore.ErrorLevel)
+	l, err := NewListener(WithLogger(logger))
+	require.NoError(t, err)
+
+	l.OnFetchEvent(clortho.FetchEvent{URI: "https://keys.example.com/keys/{keyID}", KeyID: "docker"})
+	assert.Zero(t, logs.Len())
+}

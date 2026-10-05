@@ -43,8 +43,26 @@ const (
 	// RefreshErrorTotalHelp is the help text for the refresh error total metric.
 	RefreshErrorTotalHelp = "the total number of failed attempts to refresh keys"
 
-	// SourceLabel is the metric label carrying the source URI, with any
-	// password redacted.
+	// FetchTotalName is the name of the counter for all fetches of single keys
+	// by a PerKeyProvider, both successful and unsuccessful, labeled by source.
+	// The name says "resolve" because that is what this metric was called
+	// before, and dashboards already read it.
+	FetchTotalName = MetricPrefix + "resolve_total"
+
+	// FetchTotalHelp is the help text for the fetch total metric.
+	FetchTotalHelp = "the total number of attempts to fetch a single key by key id, both successful and unsuccessful"
+
+	// FetchErrorTotalName is the name of the counter for fetches of single keys
+	// that resulted in an error, labeled by source and by reason.
+	FetchErrorTotalName = MetricPrefix + "resolve_error_total"
+
+	// FetchErrorTotalHelp is the help text for the fetch error total metric.
+	FetchErrorTotalHelp = "the total number of failed attempts to fetch a single key by key id"
+
+	// SourceLabel is the metric label carrying where keys come from, with any
+	// password redacted: a source URI for a refresh, and a URL template for a
+	// fetch.  A template is the same for every key, so the key ID a token
+	// names never becomes a label value.
 	SourceLabel = "source"
 
 	// ReasonLabel is the label on the refresh error total that says why the
@@ -55,6 +73,8 @@ const (
 	//   - missing_key_id: the key set held a key with no kid
 	//   - duplicate_key_id: a key ID appeared twice in the key set, or another
 	//     source already supplies it
+	//   - key_id_mismatch: a single key was asked for, and the key returned
+	//     says it is a different one
 	//   - http_NNN: the key set server answered with status NNN, such as
 	//     http_429 or http_503, or http_other for a status outside 100 to 599
 	//   - unreachable: no response arrived, because of a timeout or a DNS,
@@ -100,6 +120,27 @@ func newRefreshErrorTotal(f *touchstone.Factory) (*prometheus.CounterVec, error)
 		prometheus.CounterOpts{
 			Name: RefreshErrorTotalName,
 			Help: RefreshErrorTotalHelp,
+		},
+		SourceLabel,
+		ReasonLabel,
+	)
+}
+
+func newFetchTotal(f *touchstone.Factory) (*prometheus.CounterVec, error) {
+	return f.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: FetchTotalName,
+			Help: FetchTotalHelp,
+		},
+		SourceLabel,
+	)
+}
+
+func newFetchErrorTotal(f *touchstone.Factory) (*prometheus.CounterVec, error) {
+	return f.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: FetchErrorTotalName,
+			Help: FetchErrorTotalHelp,
 		},
 		SourceLabel,
 		ReasonLabel,

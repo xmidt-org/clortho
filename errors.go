@@ -16,12 +16,14 @@ var (
 	// ErrUnsupportedScheme is returned by NewKeySetProvider when a source URI is
 	// not a file path or a file, http, or https URI.  That includes a source
 	// whose URI cannot be parsed at all, since no supported scheme can be read
-	// from it.
+	// from it.  NewPerKeyProvider returns it for a template that is not http or
+	// https.
 	ErrUnsupportedScheme = errors.New("source URI scheme is not supported; use file, http, or https")
 
 	// ErrMissingClient is returned by NewKeySetProvider when an http or https
-	// source has no Client.  clortho does not supply one: the client decides the
-	// timeout, redirects, TLS, and proxies, and those are the caller's to choose.
+	// source has no Client, and by NewPerKeyProvider when the config has none.
+	// clortho does not supply one: the client decides the timeout, redirects,
+	// TLS, and proxies, and those are the caller's to choose.
 	ErrMissingClient = errors.New("an http or https source requires a Client")
 
 	// ErrUnusedClient is returned by NewKeySetProvider when a file source has a
@@ -29,6 +31,27 @@ var (
 	// written without its scheme, such as keys.example.com/jwks, which reads as a
 	// file path.
 	ErrUnusedClient = errors.New("a file source does not use a Client")
+
+	// ErrInvalidTemplate is returned by NewPerKeyProvider when the URL template
+	// cannot be used: it does not hold the {keyID} placeholder exactly once,
+	// or holds it where a key ID could change which server is asked.
+	ErrInvalidTemplate = errors.New("the URL template is not usable")
+
+	// ErrInvalidKeyID marks a key ID that may not be put into a URL.  A key ID
+	// is letters, digits, '-', '_', and '.', at most 128 characters, with no
+	// "..".  NewPerKeyProvider returns it for such an ID in AllowedKeyIDs.  A
+	// PerKeyProvider's FetchKeys returns it, together with ErrKeyNotFound, for
+	// such an ID in a token, and makes no request.
+	ErrInvalidKeyID = errors.New("key ID is not valid")
+
+	// ErrNoAllowedKeyIDs is returned by NewPerKeyProvider when
+	// AllowedKeyIDsOnly is set and AllowedKeyIDs is empty, since such a
+	// provider could never fetch anything.
+	ErrNoAllowedKeyIDs = errors.New("AllowedKeyIDsOnly requires at least one allowed key ID")
+
+	// ErrKeyIDMismatch is a fetch error: the key a server returned carries a
+	// key ID other than the one it was asked for.
+	ErrKeyIDMismatch = errors.New("the key is not the one asked for")
 
 	// ErrAlreadyStarted is returned by Start when the KeySetProvider is already
 	// running.

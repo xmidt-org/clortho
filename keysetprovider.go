@@ -235,25 +235,7 @@ func (p *KeySetProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *j
 		return fmt.Errorf("%w: %q", ErrKeyNotFound, keyID)
 	}
 
-	if !p.verify.IgnoreKeyUsage {
-		if usage, ok := key.KeyUsage(); ok && usage != "" && usage != jwk.ForSignature.String() {
-			return fmt.Errorf("%w: key %q has use %q", ErrKeyUsage, keyID, usage)
-		}
-	}
-
-	alg, ok := headers.Algorithm()
-	if !ok {
-		return ErrMissingAlgorithm
-	}
-
-	if !p.verify.IgnoreKeyAlgorithm {
-		if keyAlg, ok := key.Algorithm(); ok && keyAlg.String() != "" && keyAlg.String() != alg.String() {
-			return fmt.Errorf("%w: key %q has alg %q, header has %q", ErrKeyAlgorithm, keyID, keyAlg.String(), alg.String())
-		}
-	}
-
-	sink.Key(alg, key)
-	return nil
+	return p.verify.offer(sink, headers, keyID, key)
 }
 
 // lookup finds a key on the ring.  On a miss with RefreshOnUnknownKeyID set

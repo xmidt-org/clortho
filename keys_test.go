@@ -4,6 +4,7 @@
 package clortho
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 
@@ -125,4 +126,50 @@ func TestParseKeysRejectsAKeyWithNoPublicForm(t *testing.T) {
 	}
 
 	assert.Nil(t, keys)
+}
+
+func TestParseKey(t *testing.T) {
+	rsaKey, _ := testPrivateKeys(t)
+	bare, err := jwk.Import[jwk.Key](&rsaKey.PublicKey)
+	require.NoError(t, err)
+	withoutKeyID, err := json.Marshal(bare)
+	require.NoError(t, err)
+	withKeyID, err := json.Marshal(publicJWK(t, &rsaKey.PublicKey, "a", nil))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		data     []byte
+		expected error
+		failed   bool
+	}{
+		{name: "a key that does not say what it is", data: withoutKeyID},
+		{name: "a key that says it is the one asked for", data: withKeyID},
+		{name: "a key that says it is another", data: bytes.Replace(withKeyID, []byte(`"a"`), []byte(`"b"`), 1), expected: ErrKeyIDMismatch},
+		{name: "a symmetric key", data: []byte(`{"kty":"oct","k":"c2VjcmV0"}`), expected: ErrSymmetricKey},
+		{name: "a key set", data: jwkSetJSON(t, publicJWK(t, &rsaKey.PublicKey, "a", nil)), failed: true},
+		{name: "PEM", data: []byte("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"), failed: true},
+		{name: "nothing", data: nil, failed: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, err := parseKey(tt.data, "a")
+			switch {
+			case tt.expected != nil:
+				assert.ErrorIs(t, err, tt.expected)
+				assert.Nil(t, key)
+
+			case tt.failed:
+				assert.Error(t, err)
+				assert.Nil(t, key)
+
+			default:
+				require.NoError(t, err)
+				kid, ok := key.KeyID()
+				assert.True(t, ok)
+				assert.Equal(t, "a", kid, "the key takes the ID that was asked for")
+			}
+		})
+	}
 }

@@ -27,7 +27,7 @@ func (lof listenerOptionFunc) applyToListener(l *Listener) error {
 func WithFactory(f *touchstone.Factory) ListenerOption {
 	return listenerOptionFunc(func(l *Listener) error {
 		var (
-			errs      = make([]error, 0, 4)
+			errs      = make([]error, 0, 6)
 			metricErr error
 		)
 
@@ -43,21 +43,34 @@ func WithFactory(f *touchstone.Factory) ListenerOption {
 		l.refreshErrorTotal, metricErr = newRefreshErrorTotal(f)
 		errs = append(errs, metricErr)
 
+		l.fetchTotal, metricErr = newFetchTotal(f)
+		errs = append(errs, metricErr)
+
+		l.fetchErrorTotal, metricErr = newFetchErrorTotal(f)
+		errs = append(errs, metricErr)
+
 		return errors.Join(errs...)
 	})
 }
 
-// Listener is a clortho.Listener that tallies refresh metrics, labeled by
-// source URI.  The error total is also labeled by the reason for the failure;
-// see ReasonLabel.
+// Listener tallies what clortho's providers do as metrics, labeled by source.
+// It is a clortho.Listener, for the refreshes of a KeySetProvider, and a
+// clortho.FetchListener, for the fetches of a PerKeyProvider.  Each error
+// total is also labeled by the reason for the failure; see ReasonLabel.
 type Listener struct {
 	refreshTotal       *prometheus.CounterVec
 	refreshKeys        *prometheus.GaugeVec
 	refreshKeySetBytes *prometheus.GaugeVec
 	refreshErrorTotal  *prometheus.CounterVec
+
+	fetchTotal      *prometheus.CounterVec
+	fetchErrorTotal *prometheus.CounterVec
 }
 
-var _ clortho.Listener = (*Listener)(nil)
+var (
+	_ clortho.Listener      = (*Listener)(nil)
+	_ clortho.FetchListener = (*Listener)(nil)
+)
 
 // NewListener creates a metrics Listener using the supplied set of options.
 // A Listener created with no options records nothing.
@@ -89,6 +102,23 @@ func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 
 	if event.Err != nil {
 		l.refreshErrorTotal.With(prometheus.Labels{
+			SourceLabel: event.URI,
+			ReasonLabel: reason(event.Err),
+		}).Add(1.0)
+	}
+}
+
+// OnFetchEvent tallies metrics for one fetch of one key by a PerKeyProvider.
+// The label is the provider's URL template, never the key ID, so that a flood
+// of invented key IDs cannot become a flood of metric series.
+func (l *Listener) OnFetchEvent(event clortho.FetchEvent) {
+	if l.fetchTotal == nil {
+		return
+	}
+
+	l.fetchTotal.With(prometheus.Labels{SourceLabel: event.URI}).Add(1.0)
+	if event.Err != nil {
+		l.fetchErrorTotal.With(prometheus.Labels{
 			SourceLabel: event.URI,
 			ReasonLabel: reason(event.Err),
 		}).Add(1.0)

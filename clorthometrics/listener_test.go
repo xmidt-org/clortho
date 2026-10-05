@@ -171,3 +171,51 @@ func TestOnRefreshEventKeepsSourcesApart(t *testing.T) {
 
 	assertions.GatherAndCompare(actual)
 }
+
+func TestOnFetchEvent(t *testing.T) {
+	actual, actualFactory := newFactory()
+	actualListener := newListener(t, actualFactory)
+	expected, expectedFactory := newFactory()
+	expectedListener := newListener(t, expectedFactory)
+
+	const source = "https://keys.example.com/keys/{keyID}"
+	expectedListener.fetchTotal.With(prometheus.Labels{SourceLabel: source}).Add(4.0)
+	expectedListener.fetchErrorTotal.With(prometheus.Labels{SourceLabel: source, ReasonLabel: "http_404"}).Add(2.0)
+	expectedListener.fetchErrorTotal.With(prometheus.Labels{SourceLabel: source, ReasonLabel: "key_id_mismatch"}).Add(1.0)
+	assertions := touchtest.New(t)
+	assertions.Expect(expected)
+
+	// the key IDs differ, and none of them becomes a label
+	actualListener.OnFetchEvent(clortho.FetchEvent{URI: source, KeyID: "docker"})
+	actualListener.OnFetchEvent(clortho.FetchEvent{URI: source, KeyID: "invented-1", Err: &clortho.HTTPError{StatusCode: http.StatusNotFound}})
+	actualListener.OnFetchEvent(clortho.FetchEvent{URI: source, KeyID: "invented-2", Err: &clortho.HTTPError{StatusCode: http.StatusNotFound}})
+	actualListener.OnFetchEvent(clortho.FetchEvent{URI: source, KeyID: "a", Err: fmt.Errorf("%w: b", clortho.ErrKeyIDMismatch)})
+
+	assertions.GatherAndCompare(actual)
+}
+
+func TestOnFetchEventKeepsSourcesApart(t *testing.T) {
+	actual, actualFactory := newFactory()
+	actualListener := newListener(t, actualFactory)
+	expected, expectedFactory := newFactory()
+	expectedListener := newListener(t, expectedFactory)
+
+	expectedListener.fetchTotal.With(prometheus.Labels{SourceLabel: "https://one.example.com/{keyID}"}).Add(1.0)
+	expectedListener.fetchTotal.With(prometheus.Labels{SourceLabel: "https://two.example.com/{keyID}"}).Add(1.0)
+	assertions := touchtest.New(t)
+	assertions.Expect(expected)
+
+	actualListener.OnFetchEvent(clortho.FetchEvent{URI: "https://one.example.com/{keyID}", KeyID: "a"})
+	actualListener.OnFetchEvent(clortho.FetchEvent{URI: "https://two.example.com/{keyID}", KeyID: "a"})
+
+	assertions.GatherAndCompare(actual)
+}
+
+func TestOnFetchEventNoOptionsRecordsNothing(t *testing.T) {
+	l, err := NewListener()
+	require.NoError(t, err)
+
+	assert.NotPanics(t, func() {
+		l.OnFetchEvent(clortho.FetchEvent{URI: "https://keys.example.com/keys/{keyID}", KeyID: "a"})
+	})
+}

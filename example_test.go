@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v4/jws"
 	"github.com/xmidt-org/clortho"
 )
 
@@ -78,4 +79,106 @@ func ExampleNewKeySetProvider_missingClient() {
 	// Output:
 	// true
 	// an http or https source requires a Client: "https://issuer.example.com/keys"
+}
+
+// A service that takes keys from more than one place builds a provider for
+// each and gives them all to jwx, which asks them in the order given.  The two
+// kinds can be mixed, and there can be several of either.
+func Example() {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// A server that publishes its keys as a set.
+	keySets, err := clortho.NewKeySetProvider(clortho.KeySetConfig{
+		Sources: []clortho.RefreshSource{
+			{URI: "https://issuer.example.com/keys", Client: client},
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Two servers that each serve one key per request.
+	themis, err := clortho.NewPerKeyProvider(clortho.PerKeyConfig{
+		Template: "https://themis.example.com/keys/{keyID}",
+		Client:   client,
+
+		// This service knows every key themis has, so no other key ID is
+		// ever asked for.
+		AllowedKeyIDs:     []string{"themis-2026"},
+		AllowedKeyIDsOnly: true,
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	partner, err := clortho.NewPerKeyProvider(clortho.PerKeyConfig{
+		Template: "https://keys.partner.example.net/{keyID}/key.json",
+		Client:   client,
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// jwx asks the providers in this order and stops at the first key that
+	// verifies the token.  The key set provider goes first: asking it can
+	// never cause a request.
+	options := []jws.VerifyOption{
+		jws.WithKeyProvider(keySets),
+		jws.WithKeyProvider(themis),
+		jws.WithKeyProvider(partner),
+	}
+
+	// Verifying a token is then jws.Verify(token, options...).  A service
+	// using bascule passes the same providers to its token parser instead,
+	// each as a jwt.WithKeyProvider option.
+	fmt.Println(len(options), "providers")
+
+	// Output:
+	// 3 providers
+}
+
+// A PerKeyProvider fetches each key from a server that serves one key per
+// request, at the URL the template gives for that key's ID.
+func ExampleNewPerKeyProvider() {
+	p, err := clortho.NewPerKeyProvider(clortho.PerKeyConfig{
+		// {keyID} is replaced by the key ID a token names.
+		Template: "https://themis.example.com/keys/{keyID}",
+
+		// The client is required, as it is for a KeySetProvider, and the
+		// example on NewKeySetProvider shows how to build a good one.
+		Client: &http.Client{Timeout: 30 * time.Second},
+
+		// A key ID comes from a token nobody has verified yet.  Listing the
+		// ones this service expects means those can always be fetched, even
+		// while a flood of invented key IDs is using up the limit that
+		// applies to every other.
+		AllowedKeyIDs: []string{"themis-2026", "themis-2027"},
+	})
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Nothing is fetched until a token asks, so nothing is held yet.
+	fmt.Println(len(p.KeyIDs()), "keys held")
+
+	// Output:
+	// 0 keys held
+}
+
+// The key ID goes into a URL, so the template may only put it where it cannot
+// change which server is asked.
+func ExampleNewPerKeyProvider_templateInTheServerName() {
+	_, err := clortho.NewPerKeyProvider(clortho.PerKeyConfig{
+		Template: "https://{keyID}.example.com/keys",
+		Client:   &http.Client{Timeout: 30 * time.Second},
+	})
+
+	fmt.Println(errors.Is(err, clortho.ErrInvalidTemplate))
+
+	// Output:
+	// true
 }

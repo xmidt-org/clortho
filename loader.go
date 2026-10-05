@@ -75,7 +75,13 @@ func (c content) retryWait(now time.Time) time.Duration {
 // source must have been normalized by NewKeySetProvider.
 func load(ctx context.Context, src RefreshSource, since time.Time) (content, error) {
 	if isHTTP(src.URI) {
-		return loadHTTP(ctx, src, since)
+		return loadHTTP(ctx, httpGet{
+			client:   src.Client,
+			uri:      src.URI,
+			accept:   acceptHeader,
+			since:    since,
+			maxBytes: src.MaxResponseBytes,
+		})
 	}
 
 	return loadFile(src.URI)
@@ -109,18 +115,35 @@ func loadFile(uri string) (content, error) {
 	return content{data: data, lastModified: fi.ModTime()}, nil
 }
 
-func loadHTTP(ctx context.Context, src RefreshSource, since time.Time) (content, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src.URI, nil)
+// httpGet is one GET request for key material: who sends it, where, what it
+// asks for, and how much of the answer it will read.
+type httpGet struct {
+	client *http.Client
+	uri    string
+
+	// accept is the Accept header to send.
+	accept string
+
+	// since, when non-zero, makes the request conditional on the content
+	// having changed since then.
+	since time.Time
+
+	// maxBytes caps the body read.
+	maxBytes int64
+}
+
+func loadHTTP(ctx context.Context, get httpGet) (content, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, get.uri, nil)
 	if err != nil {
 		return content{}, err
 	}
 
-	req.Header.Set("Accept", acceptHeader)
-	if !since.IsZero() {
-		req.Header.Set("If-Modified-Since", since.UTC().Format(http.TimeFormat))
+	req.Header.Set("Accept", get.accept)
+	if !get.since.IsZero() {
+		req.Header.Set("If-Modified-Since", get.since.UTC().Format(http.TimeFormat))
 	}
 
-	resp, err := src.Client.Do(req)
+	resp, err := get.client.Do(req)
 	if err != nil {
 		return content{}, err
 	}
@@ -128,7 +151,7 @@ func loadHTTP(ctx context.Context, src RefreshSource, since time.Time) (content,
 	defer func() {
 		// drain what is left so the connection can be reused.  a failure here is
 		// irrelevant, since the body is about to be closed anyway.
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, src.MaxResponseBytes))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, get.maxBytes))
 		resp.Body.Close()
 	}()
 
@@ -141,14 +164,14 @@ func loadHTTP(ctx context.Context, src RefreshSource, since time.Time) (content,
 		// read one byte past the limit: that is what distinguishes a body exactly
 		// at the limit from one that exceeds it, and works for a chunked body
 		// with no Content-Length.
-		c.data, err = io.ReadAll(io.LimitReader(resp.Body, src.MaxResponseBytes+1))
+		c.data, err = io.ReadAll(io.LimitReader(resp.Body, get.maxBytes+1))
 		if err != nil {
 			return c, err
 		}
 
-		if int64(len(c.data)) > src.MaxResponseBytes {
+		if int64(len(c.data)) > get.maxBytes {
 			c.data = nil
-			return c, fmt.Errorf("%w: %s allows %d bytes", ErrResponseTooLarge, redactURI(src.URI), src.MaxResponseBytes)
+			return c, fmt.Errorf("%w: %s allows %d bytes", ErrResponseTooLarge, redactURI(get.uri), get.maxBytes)
 		}
 
 	default:
@@ -158,7 +181,7 @@ func loadHTTP(ctx context.Context, src RefreshSource, since time.Time) (content,
 			c.retryDelay, c.retryDate = parseRetryAfter(resp.Header.Get("Retry-After"))
 		}
 
-		return c, &HTTPError{Location: redactURI(src.URI), StatusCode: resp.StatusCode}
+		return c, &HTTPError{Location: redactURI(get.uri), StatusCode: resp.StatusCode}
 	}
 
 	c.lastModified = parseLastModified(resp.Header.Get("Last-Modified"))
