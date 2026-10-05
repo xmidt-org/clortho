@@ -27,7 +27,7 @@ type content struct {
 	data []byte
 
 	// notModified is set when an HTTP source answered 304: the content the
-	// Provider already has is still current.
+	// KeySetProvider already has is still current.
 	notModified bool
 
 	// lastModified is the Last-Modified of an HTTP response, or the
@@ -72,7 +72,7 @@ func (c content) retryWait(now time.Time) time.Duration {
 
 // load fetches a source once.  since, when non-zero, is the lastModified of
 // the previous successful load and makes an HTTP request conditional.  The
-// source must have been normalized by New.
+// source must have been normalized by NewKeySetProvider.
 func load(ctx context.Context, src RefreshSource, since time.Time) (content, error) {
 	if isHTTP(src.URI) {
 		return loadHTTP(ctx, src, since)

@@ -35,17 +35,41 @@ const (
 	DefaultMaxResponseBytes int64 = 1024 * 1024
 )
 
-// Config is the only way to configure a Provider.  It is a plain struct with
-// no struct tags: serialization is the caller's concern.  A service unmarshals
-// its own settings and fills this in, which is also how it supplies things no
-// configuration file can hold, such as an *http.Client.
-type Config struct {
+// KeySetConfig is the only way to configure a KeySetProvider.  It is a plain
+// struct with no struct tags: serialization is the caller's concern.  A
+// service unmarshals its own settings and fills this in, which is also how it
+// supplies things no configuration file can hold, such as an *http.Client.
+type KeySetConfig struct {
 	// Sources are polled on a schedule.  At least one is required.
 	//
-	// All sources feed one map keyed by key ID.  A key ID served by more than
-	// one source is reported as ErrDuplicateKeyID by the refresh that would
-	// introduce it, not merged.  Use separate Providers for separate key spaces.
+	// All sources feed one map keyed by key ID.  A key ID served by more than one
+	// source is reported as ErrDuplicateKeyID by the refresh that would introduce
+	// it, not merged.  Use separate KeySetProviders for separate key spaces.
 	Sources []RefreshSource
+
+	// RefreshOnUnknownKeyID makes a lookup for a key ID that is not on the ring
+	// trigger an early refresh of every source, and wait for it, so a token
+	// signed with a newly rotated key verifies without waiting for the next
+	// scheduled refresh.  The early refresh is rate-limited by each source's
+	// MinRefreshInterval; a lookup that arrives inside that window fails
+	// immediately with ErrKeyNotFound, so a flood of unknown key IDs costs at
+	// most one request per source per MinRefreshInterval.  A source that
+	// answered 429 or 503 with a Retry-After is also left alone until that wait
+	// has passed.
+	//
+	// The wait has no limit of its own.  A lookup that triggers an early
+	// refresh, or that arrives while a refresh is already running, waits until
+	// every source has answered.  That can take as long as the slowest source's
+	// Client allows, and is without limit for a client that has no timeout.
+	// The request being verified is held for all of that time.  The lookup
+	// stops waiting sooner only when the context jwx was given, and passes to
+	// FetchKeys, ends.  A service that needs a tighter bound puts a deadline on
+	// that context.  A refresh already under way carries on either way.
+	//
+	// Off, which is the default, an unknown key ID fails with ErrKeyNotFound and
+	// no request is made: a token can never cause the KeySetProvider to contact
+	// anything.
+	RefreshOnUnknownKeyID bool
 
 	// Verify is the policy applied to every key before it is offered to jwx.
 	Verify VerifyConfig
@@ -117,7 +141,7 @@ type RefreshSource struct {
 	JitterPercentage float64
 
 	// Client makes the requests for an http or https URI, and is required for
-	// one: New fails with ErrMissingClient without it.
+	// one: NewKeySetProvider fails with ErrMissingClient without it.
 	//
 	// clortho uses the client exactly as given.  The client owns the timeout,
 	// redirects, TLS, proxies, and any authorization its transport adds, and
@@ -125,12 +149,13 @@ type RefreshSource struct {
 	// out is therefore left out: a client with no timeout lets a server that
 	// stops answering stall the refresh until Stop, and a client that follows
 	// redirects lets the server, rather than the URI configured here, decide
-	// where key material comes from.  The example on New shows a client suited
-	// to fetching keys.
+	// where key material comes from.  The example on NewKeySetProvider shows a
+	// client suited to fetching keys.
 	//
-	// A file source takes no client, and New fails with ErrUnusedClient if it
-	// is given one.  A client on a file source nearly always means an http or
-	// https URI was written without its scheme, which reads as a file path.
+	// A file source takes no client, and NewKeySetProvider fails with
+	// ErrUnusedClient if it is given one.  A client on a file source nearly
+	// always means an http or https URI was written without its scheme, which
+	// reads as a file path.
 	Client *http.Client
 
 	// MaxResponseBytes caps the body read from an http or https URI.  A larger
@@ -139,33 +164,10 @@ type RefreshSource struct {
 	MaxResponseBytes int64
 }
 
-// VerifyConfig is the policy FetchKeys applies to every key it takes from the
-// ring.  The zero value is the strict default.
+// VerifyConfig is the set of checks FetchKeys applies to a key before it
+// offers that key to jwx.  It holds only checks on a key, so that it means the
+// same thing wherever it is used.  The zero value is the strict default.
 type VerifyConfig struct {
-	// RefreshOnUnknownKeyID makes a lookup for a key ID that is not on the ring
-	// trigger an early refresh of every source, and wait for it, so a token
-	// signed with a newly rotated key verifies without waiting for the next
-	// scheduled refresh.  The early refresh is rate-limited by each source's
-	// MinRefreshInterval; a lookup that arrives inside that window fails
-	// immediately with ErrKeyNotFound, so a flood of unknown key IDs costs at
-	// most one request per source per MinRefreshInterval.  A source that
-	// answered 429 or 503 with a Retry-After is also left alone until that wait
-	// has passed.
-	//
-	// The wait has no limit of its own.  A lookup that triggers an early
-	// refresh, or that arrives while a refresh is already running, waits until
-	// every source has answered.  That can take as long as the slowest source's
-	// Client allows, and is without limit for a client that has no timeout.
-	// The request being verified is held for all of that time.  The lookup
-	// stops waiting sooner only when the context jwx was given, and passes to
-	// FetchKeys, ends.  A service that needs a tighter bound puts a deadline on
-	// that context.  A refresh already under way carries on either way.
-	//
-	// Off, which is the default, an unknown key ID fails with ErrKeyNotFound
-	// and no request is made: a token can never cause the Provider to contact
-	// anything.
-	RefreshOnUnknownKeyID bool
-
 	// IgnoreKeyUsage turns off the check that a key's "use", when present, is
 	// "sig".  Off by default: a key marked for anything else is rejected with
 	// ErrKeyUsage.
@@ -182,9 +184,10 @@ type VerifyConfig struct {
 // that a source configured with credentials in its URI does not put them in
 // logs.
 //
-// Every URI that reaches this function has already been parsed by New, so
-// the fallback for one that does not parse is never expected to run; it
-// returns a placeholder rather than risk echoing a password.
+// Every URI that reaches this function has already been parsed by
+// NewKeySetProvider, so the fallback for one that does not parse is never
+// expected to run; it returns a placeholder rather than risk echoing a
+// password.
 func redactURI(uri string) string {
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -199,7 +202,7 @@ func redactURI(uri string) string {
 }
 
 // isHTTP reports whether a source URI is loaded over HTTP rather than from
-// the file system.  New has already validated the scheme.
+// the file system.  NewKeySetProvider has already validated the scheme.
 func isHTTP(uri string) bool {
 	u, err := url.Parse(uri)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https")

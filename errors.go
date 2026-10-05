@@ -9,36 +9,40 @@ import (
 )
 
 var (
-	// ErrNoKeySources is returned by New when the Config has no sources.
+	// ErrNoKeySources is returned by NewKeySetProvider when the KeySetConfig has
+	// no sources.
 	ErrNoKeySources = errors.New("at least one source is required")
 
-	// ErrUnsupportedScheme is returned by New when a source URI is not a file
-	// path or a file, http, or https URI.  That includes a source whose URI
-	// cannot be parsed at all, since no supported scheme can be read from it.
+	// ErrUnsupportedScheme is returned by NewKeySetProvider when a source URI is
+	// not a file path or a file, http, or https URI.  That includes a source
+	// whose URI cannot be parsed at all, since no supported scheme can be read
+	// from it.
 	ErrUnsupportedScheme = errors.New("source URI scheme is not supported; use file, http, or https")
 
-	// ErrMissingClient is returned by New when an http or https source has no
-	// Client.  clortho does not supply one: the client decides the timeout,
-	// redirects, TLS, and proxies, and those are the caller's to choose.
+	// ErrMissingClient is returned by NewKeySetProvider when an http or https
+	// source has no Client.  clortho does not supply one: the client decides the
+	// timeout, redirects, TLS, and proxies, and those are the caller's to choose.
 	ErrMissingClient = errors.New("an http or https source requires a Client")
 
-	// ErrUnusedClient is returned by New when a file source has a Client, which
-	// it would never use.  The usual cause is an http or https URI written
-	// without its scheme, such as keys.example.com/jwks, which reads as a file
-	// path.
+	// ErrUnusedClient is returned by NewKeySetProvider when a file source has a
+	// Client, which it would never use.  The usual cause is an http or https URI
+	// written without its scheme, such as keys.example.com/jwks, which reads as a
+	// file path.
 	ErrUnusedClient = errors.New("a file source does not use a Client")
 
-	// ErrAlreadyStarted is returned by Start when the Provider is already running.
+	// ErrAlreadyStarted is returned by Start when the KeySetProvider is already
+	// running.
 	ErrAlreadyStarted = errors.New("the provider has already been started")
 
-	// ErrNotStarted is returned by Stop when the Provider is not running.
+	// ErrNotStarted is returned by Stop when the KeySetProvider is not running.
 	ErrNotStarted = errors.New("the provider is not running")
 
 	// ErrDuplicateKeyID is a refresh error: a source served a key ID that is
 	// already on the ring from another source, or served the same key ID twice.
-	// A Provider is one map, so a key ID names exactly one key; a deployment
-	// that needs separate key spaces builds separate Providers.  The refresh
-	// that would introduce the duplicate fails and leaves the ring untouched.
+	// A KeySetProvider is one map, so a key ID names exactly one key; a
+	// deployment that needs separate key spaces builds separate Providers.  The
+	// refresh that would introduce the duplicate fails and leaves the ring
+	// untouched.
 	ErrDuplicateKeyID = errors.New("key ID is already supplied by another source")
 
 	// ErrMissingKeyID is returned by FetchKeys when the protected header has no

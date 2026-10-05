@@ -16,7 +16,7 @@ import (
 )
 
 // SourceStatus is the last outcome for one source, as reported by
-// Provider.Status.
+// KeySetProvider.Status.
 type SourceStatus struct {
 	// URI is the source's URI with any password redacted.  It matches
 	// RefreshSource.URI otherwise.
@@ -35,8 +35,8 @@ type SourceStatus struct {
 	LastErr error
 }
 
-// sourceState is what the Provider tracks per source, guarded by
-// Provider.stateLock.
+// sourceState is what the KeySetProvider tracks per source, guarded by
+// KeySetProvider.stateLock.
 type sourceState struct {
 	status SourceStatus
 
@@ -58,17 +58,20 @@ type sourceState struct {
 	keySetBytes int64
 }
 
-// Provider supplies verification keys.  It is the one thing clortho makes,
-// and it is named for the role it fills: it is what a caller hands to
+// KeySetProvider supplies verification keys.  It is the one thing clortho
+// makes, and it is named for the role it fills: it is what a caller hands to
 // jwt.WithKeyProvider.
 //
-// A Provider polls its sources for their complete key sets and serves lookups
-// from that.  It never fetches a key on demand, so a token cannot cause a
-// request; see VerifyConfig.RefreshOnUnknownKeyID for the one opt-in
+// A KeySetProvider polls its sources for their complete key sets and serves
+// lookups from that.  It never fetches a key on demand, so a token cannot
+// cause a request; see KeySetConfig.RefreshOnUnknownKeyID for the one opt-in
 // exception.
-type Provider struct {
+type KeySetProvider struct {
 	sources []RefreshSource
 	verify  VerifyConfig
+
+	// refreshOnUnknownKeyID is KeySetConfig.RefreshOnUnknownKeyID.
+	refreshOnUnknownKeyID bool
 
 	ring      ring
 	listeners eventor.Eventor[Listener]
@@ -84,27 +87,29 @@ type Provider struct {
 	done    chan struct{}
 }
 
-var _ jws.KeyProvider = (*Provider)(nil)
+var _ jws.KeyProvider = (*KeySetProvider)(nil)
 
-// New builds a Provider from a Config.  It rejects a Config with no sources
-// (ErrNoKeySources), a source whose URI cannot be parsed or whose scheme is
-// not file, http, or https (ErrUnsupportedScheme), an http or https source
-// with no Client (ErrMissingClient), a file source that has one
-// (ErrUnusedClient), and a duplicate source URI.  Every problem is reported,
-// joined, rather than just the first.
+// NewKeySetProvider builds a KeySetProvider from a KeySetConfig.  It rejects a
+// KeySetConfig with no sources (ErrNoKeySources), a source whose URI cannot be
+// parsed or whose scheme is not file, http, or https (ErrUnsupportedScheme),
+// an http or https source with no Client (ErrMissingClient), a file source
+// that has one (ErrUnusedClient), and a duplicate source URI.  Every problem
+// is reported, joined, rather than just the first.
 //
-// The returned Provider is not running; call Start.
-func New(cfg Config) (*Provider, error) {
+// The returned KeySetProvider is not running; call Start.
+func NewKeySetProvider(cfg KeySetConfig) (*KeySetProvider, error) {
 	sources, err := normalizeSources(cfg.Sources)
 	if err != nil {
 		return nil, err
 	}
 
-	p := &Provider{
+	p := &KeySetProvider{
 		sources: sources,
 		verify:  cfg.Verify,
-		clock:   chronon.SystemClock(),
-		states:  make([]sourceState, len(sources)),
+
+		refreshOnUnknownKeyID: cfg.RefreshOnUnknownKeyID,
+		clock:                 chronon.SystemClock(),
+		states:                make([]sourceState, len(sources)),
 	}
 
 	for i, s := range sources {
@@ -116,11 +121,11 @@ func New(cfg Config) (*Provider, error) {
 
 // Start begins refreshing every source.  It returns once the refresh loops are
 // running; it does not wait for the first fetch.  Use Status to decide when
-// the Provider is ready to serve.  The context governs only this call, not
-// the life of the loops; see Stop.
+// the KeySetProvider is ready to serve.  The context governs only this call,
+// not the life of the loops; see Stop.
 //
-// Start returns ErrAlreadyStarted if the Provider is running.
-func (p *Provider) Start(context.Context) error {
+// Start returns ErrAlreadyStarted if the KeySetProvider is running.
+func (p *KeySetProvider) Start(context.Context) error {
 	p.runLock.Lock()
 	defer p.runLock.Unlock()
 
@@ -157,8 +162,8 @@ func (p *Provider) Start(context.Context) error {
 // outcome of the last attempt that finished, and no RefreshEvent is
 // dispatched for the interrupted one.
 //
-// Stop returns ErrNotStarted if the Provider is not running.
-func (p *Provider) Stop(ctx context.Context) error {
+// Stop returns ErrNotStarted if the KeySetProvider is not running.
+func (p *KeySetProvider) Stop(ctx context.Context) error {
 	p.runLock.Lock()
 	defer p.runLock.Unlock()
 
@@ -181,25 +186,25 @@ func (p *Provider) Stop(ctx context.Context) error {
 // AddListener registers a sink for RefreshEvents.  Only events after this call
 // are delivered.  The returned closure removes the listener; calling it more
 // than once has no further effect.
-func (p *Provider) AddListener(l Listener) (cancel func()) {
+func (p *KeySetProvider) AddListener(l Listener) (cancel func()) {
 	return p.listeners.Add(l)
 }
 
-func (p *Provider) dispatch(event RefreshEvent) {
+func (p *KeySetProvider) dispatch(event RefreshEvent) {
 	p.listeners.Visit(func(l Listener) {
 		l.OnRefreshEvent(event)
 	})
 }
 
 // KeyIDs lists the key IDs currently on the ring, sorted, for health endpoints.
-func (p *Provider) KeyIDs() []string {
+func (p *KeySetProvider) KeyIDs() []string {
 	return p.ring.keyIDs()
 }
 
-// Status reports the state of every source, in Config order.  A service's
-// readiness check decides what ready means from this: for example, every
-// source has a non-zero LastRetrieved, or at least one does.
-func (p *Provider) Status() []SourceStatus {
+// Status reports the state of every source, in KeySetConfig order.  A
+// service's readiness check decides what ready means from this: for example,
+// every source has a non-zero LastRetrieved, or at least one does.
+func (p *KeySetProvider) Status() []SourceStatus {
 	p.stateLock.Lock()
 	defer p.stateLock.Unlock()
 
@@ -212,13 +217,13 @@ func (p *Provider) Status() []SourceStatus {
 }
 
 // FetchKeys satisfies jws.KeyProvider, and is the only way a key leaves the
-// Provider.  It looks the protected header's kid up on the ring, applies the
-// VerifyConfig checks, and offers the key to jwx under the header's alg.  jwx
-// then decides whether the key can serve that algorithm.
+// KeySetProvider.  It looks the protected header's kid up on the ring, applies
+// the VerifyConfig checks, and offers the key to jwx under the header's alg.
+// jwx then decides whether the key can serve that algorithm.
 //
 // Errors carry sentinels for errors.Is: ErrMissingKeyID, ErrKeyNotFound,
 // ErrMissingAlgorithm, ErrKeyUsage, and ErrKeyAlgorithm.
-func (p *Provider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.Signature, _ *jws.Message) error {
+func (p *KeySetProvider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.Signature, _ *jws.Message) error {
 	headers := sig.ProtectedHeaders()
 	keyID, ok := headers.KeyID()
 	if !ok || keyID == "" {
@@ -252,14 +257,14 @@ func (p *Provider) FetchKeys(ctx context.Context, sink jws.KeySink, sig *jws.Sig
 }
 
 // lookup finds a key on the ring.  On a miss with RefreshOnUnknownKeyID set
-// and the Provider running, it asks every source for an early refresh, waits,
-// and looks again.
-func (p *Provider) lookup(ctx context.Context, keyID string) (jwk.Key, bool) {
+// and the KeySetProvider running, it asks every source for an early refresh,
+// waits, and looks again.
+func (p *KeySetProvider) lookup(ctx context.Context, keyID string) (jwk.Key, bool) {
 	if key, ok := p.ring.get(keyID); ok {
 		return key, true
 	}
 
-	if !p.verify.RefreshOnUnknownKeyID {
+	if !p.refreshOnUnknownKeyID {
 		return nil, false
 	}
 

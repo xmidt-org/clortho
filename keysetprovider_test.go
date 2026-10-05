@@ -128,7 +128,7 @@ func (ks *keyServer) busy(status int, retryAfter string) {
 	ks.lock.Unlock()
 }
 
-// symmetricSet is a key set the Provider rejects with ErrSymmetricKey.
+// symmetricSet is a key set the KeySetProvider rejects with ErrSymmetricKey.
 const symmetricSet = `{"keys":[{"kty":"oct","k":"c2VjcmV0","kid":"shared"}]}`
 
 // testClock is a fake clock that records every timer the refresh loop arms,
@@ -186,11 +186,11 @@ func (tc *testClock) armedFor(t *testing.T) time.Duration {
 	return timer.When().Sub(tc.Now())
 }
 
-// testProvider builds a Provider over the given config with a test clock and
-// an event listener attached, and starts it.  The first refresh event of each
-// source is consumed so that the ring is populated when this returns.
-func testProvider(t *testing.T, cfg Config) (*Provider, *testClock, *eventListener) {
-	p, err := New(withTestClients(cfg))
+// testKeySetProvider builds a KeySetProvider over the given config with a test clock
+// and an event listener attached, and starts it.  The first refresh event of
+// each source is consumed so that the ring is populated when this returns.
+func testKeySetProvider(t *testing.T, cfg KeySetConfig) (*KeySetProvider, *testClock, *eventListener) {
+	p, err := NewKeySetProvider(withTestClients(cfg))
 	require.NoError(t, err)
 
 	fc := newTestClock()
@@ -234,12 +234,12 @@ type recordingSink struct {
 
 func (rs *recordingSink) Key(alg jwa.SignatureAlgorithm, key any) { rs.alg, rs.key = alg, key }
 
-func TestProviderStartRefreshesEverySource(t *testing.T) {
+func TestKeySetProviderStartRefreshesEverySource(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	one := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
 	two := newKeyServer(t, publicJWK(t, ecKey, "b", nil))
 
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: one.URL}, {URI: two.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: one.URL}, {URI: two.URL}}})
 	assert.Equal(t, []string{"a", "b"}, p.KeyIDs())
 
 	status := p.Status()
@@ -251,8 +251,8 @@ func TestProviderStartRefreshesEverySource(t *testing.T) {
 	}
 }
 
-func TestProviderStatusBeforeStart(t *testing.T) {
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}}))
+func TestKeySetProviderStatusBeforeStart(t *testing.T) {
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}}))
 	require.NoError(t, err)
 
 	status := p.Status()
@@ -264,24 +264,24 @@ func TestProviderStatusBeforeStart(t *testing.T) {
 	assert.Empty(t, p.KeyIDs())
 }
 
-func TestProviderStartTwice(t *testing.T) {
+func TestKeySetProviderStartTwice(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	assert.ErrorIs(t, p.Start(context.Background()), ErrAlreadyStarted)
 }
 
-func TestProviderStopWhenNotStarted(t *testing.T) {
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}}))
+func TestKeySetProviderStopWhenNotStarted(t *testing.T) {
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}}}))
 	require.NoError(t, err)
 	assert.ErrorIs(t, p.Stop(context.Background()), ErrNotStarted)
 }
 
-func TestProviderStopThenStartAgain(t *testing.T) {
+func TestKeySetProviderStopThenStartAgain(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	p, _, l := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	require.NoError(t, p.Stop(context.Background()))
 	assert.ErrorIs(t, p.Stop(context.Background()), ErrNotStarted)
@@ -290,10 +290,10 @@ func TestProviderStopThenStartAgain(t *testing.T) {
 	assert.Equal(t, int32(2), server.requests.Load())
 }
 
-func TestProviderStopHonorsTheContext(t *testing.T) {
+func TestKeySetProviderStopHonorsTheContext(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -301,7 +301,7 @@ func TestProviderStopHonorsTheContext(t *testing.T) {
 	assert.True(t, err == nil || errors.Is(err, context.Canceled))
 }
 
-func TestProviderStopDuringARefreshIsNotAFailure(t *testing.T) {
+func TestKeySetProviderStopDuringARefreshIsNotAFailure(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	body := jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil))
 
@@ -323,7 +323,7 @@ func TestProviderStopDuringARefreshIsNotAFailure(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 	before := p.Status()
 	require.NoError(t, before[0].LastErr)
 
@@ -343,11 +343,11 @@ func TestProviderStopDuringARefreshIsNotAFailure(t *testing.T) {
 	assert.Empty(t, l.events)
 }
 
-func TestProviderRefreshEventDescribesTheFirstLoad(t *testing.T) {
+func TestKeySetProviderRefreshEventDescribesTheFirstLoad(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "b", nil), publicJWK(t, ecKey, "a", nil))
 
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: server.URL}}}))
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -362,10 +362,10 @@ func TestProviderRefreshEventDescribesTheFirstLoad(t *testing.T) {
 	assert.Empty(t, e.DeletedKeyIDs)
 }
 
-func TestProviderRefreshesOnTheTimer(t *testing.T) {
+func TestKeySetProviderRefreshesOnTheTimer(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	server.serve(t, publicJWK(t, ecKey, "b", nil))
 	fc.advanceToTimer(t)
@@ -379,10 +379,10 @@ func TestProviderRefreshesOnTheTimer(t *testing.T) {
 	assert.Equal(t, int32(2), server.requests.Load())
 }
 
-func TestProviderRefreshFailureKeepsTheLastGoodKeys(t *testing.T) {
+func TestKeySetProviderRefreshFailureKeepsTheLastGoodKeys(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 	retrieved := p.Status()[0].LastRetrieved
 
 	server.fail(http.StatusInternalServerError)
@@ -403,10 +403,10 @@ func TestProviderRefreshFailureKeepsTheLastGoodKeys(t *testing.T) {
 	assert.ErrorAs(t, status.LastErr, &httpErr)
 }
 
-func TestProviderRefreshRejectsABadSetAndKeepsTheLastGoodKeys(t *testing.T) {
+func TestKeySetProviderRefreshRejectsABadSetAndKeepsTheLastGoodKeys(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	noKid, err := jwk.Import[jwk.Key](&rsaKey.PublicKey)
 	require.NoError(t, err)
@@ -440,10 +440,10 @@ func failNextRefresh(t *testing.T, fc *testClock, l *eventListener) time.Duratio
 	return fc.armedFor(t)
 }
 
-func TestProviderRetriesAFailureAfterTheMinimum(t *testing.T) {
+func TestKeySetProviderRetriesAFailureAfterTheMinimum(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	_, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	for _, status := range []int{http.StatusInternalServerError, http.StatusNotFound, http.StatusFound} {
 		server.fail(status)
@@ -453,10 +453,10 @@ func TestProviderRetriesAFailureAfterTheMinimum(t *testing.T) {
 	}
 }
 
-func TestProviderRetriesAnUnparseableBodyAfterTheMinimum(t *testing.T) {
+func TestKeySetProviderRetriesAnUnparseableBodyAfterTheMinimum(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	_, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	server.serveRaw([]byte(`<html>down for maintenance</html>`))
 	wait := failNextRefresh(t, fc, l)
@@ -464,10 +464,10 @@ func TestProviderRetriesAnUnparseableBodyAfterTheMinimum(t *testing.T) {
 	assert.LessOrEqual(t, wait, 11*time.Minute)
 }
 
-func TestProviderRetriesWhenTheServerSays(t *testing.T) {
+func TestKeySetProviderRetriesWhenTheServerSays(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	_, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	// sooner than the minimum: the server's wait wins, and is never cut short
 	for _, status := range []int{http.StatusServiceUnavailable, http.StatusTooManyRequests} {
@@ -490,40 +490,40 @@ func TestProviderRetriesWhenTheServerSays(t *testing.T) {
 	assert.LessOrEqual(t, wait, 1100*time.Millisecond)
 }
 
-func TestProviderRetriesAtTheDateTheServerGives(t *testing.T) {
+func TestKeySetProviderRetriesAtTheDateTheServerGives(t *testing.T) {
 	// the test clock starts at the wall clock, so the dates are relative to it
 	server := newKeyServer(t)
 	server.busy(http.StatusServiceUnavailable, time.Now().Add(20*time.Minute).UTC().Format(http.TimeFormat))
-	_, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	_, fc, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	wait := fc.armedFor(t)
 	assert.GreaterOrEqual(t, wait, 19*time.Minute)
 	assert.LessOrEqual(t, wait, 22*time.Minute)
 }
 
-func TestProviderTreatsAPastRetryDateAsNoInstruction(t *testing.T) {
+func TestKeySetProviderTreatsAPastRetryDateAsNoInstruction(t *testing.T) {
 	server := newKeyServer(t)
 	server.busy(http.StatusServiceUnavailable, time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat))
-	_, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	_, fc, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	wait := fc.armedFor(t)
 	assert.GreaterOrEqual(t, wait, 10*time.Minute)
 	assert.LessOrEqual(t, wait, 11*time.Minute)
 }
 
-func TestProviderCapsTheServersWaitAtTheMaximum(t *testing.T) {
+func TestKeySetProviderCapsTheServersWaitAtTheMaximum(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	_, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	server.busy(http.StatusTooManyRequests, "86400")
 	assert.Equal(t, 2*time.Hour, failNextRefresh(t, fc, l))
 }
 
-func TestProviderIgnoresRetryAfterOnOtherFailures(t *testing.T) {
+func TestKeySetProviderIgnoresRetryAfterOnOtherFailures(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	_, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	_, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	// only a 429 or a 503 is the server asking for a pause; an unusable
 	// Retry-After on one of those is no instruction either
@@ -537,10 +537,10 @@ func TestProviderIgnoresRetryAfterOnOtherFailures(t *testing.T) {
 	assert.LessOrEqual(t, wait, 11*time.Minute)
 }
 
-func TestProviderLeavesRejectedContentOnTheNormalSchedule(t *testing.T) {
+func TestKeySetProviderLeavesRejectedContentOnTheNormalSchedule(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
-	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	p, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	// the source answered in full, so asking again sooner changes nothing
 	server.serveRaw([]byte(symmetricSet))
@@ -551,10 +551,10 @@ func TestProviderLeavesRejectedContentOnTheNormalSchedule(t *testing.T) {
 	assert.Equal(t, []string{"a"}, p.KeyIDs())
 }
 
-func TestProviderRetriesRejectedContentWhenItHasNeverLoaded(t *testing.T) {
+func TestKeySetProviderRetriesRejectedContentWhenItHasNeverLoaded(t *testing.T) {
 	server := newKeyServer(t)
 	server.serveRaw([]byte(symmetricSet))
-	p, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(server.URL)}})
+	p, fc, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}})
 
 	// with no keys to fall back on, the source is worth asking again soon
 	require.ErrorIs(t, p.Status()[0].LastErr, ErrSymmetricKey)
@@ -563,9 +563,9 @@ func TestProviderRetriesRejectedContentWhenItHasNeverLoaded(t *testing.T) {
 	assert.LessOrEqual(t, wait, 11*time.Minute)
 }
 
-func TestProviderRetriesAMissingFileAfterTheMinimum(t *testing.T) {
+func TestKeySetProviderRetriesAMissingFileAfterTheMinimum(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "absent.json")
-	p, fc, _ := testProvider(t, Config{Sources: []RefreshSource{retrySource(path)}})
+	p, fc, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{retrySource(path)}})
 
 	require.Error(t, p.Status()[0].LastErr)
 	wait := fc.armedFor(t)
@@ -573,13 +573,13 @@ func TestProviderRetriesAMissingFileAfterTheMinimum(t *testing.T) {
 	assert.LessOrEqual(t, wait, 11*time.Minute)
 }
 
-func TestProviderRefreshOnUnknownKeyIDWaitsOutTheServersWait(t *testing.T) {
+func TestKeySetProviderRefreshOnUnknownKeyIDWaitsOutTheServersWait(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
 	source := retrySource(server.URL)
-	p, fc, l := testProvider(t, Config{
-		Sources: []RefreshSource{source},
-		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+	p, fc, l := testKeySetProvider(t, KeySetConfig{
+		Sources:               []RefreshSource{source},
+		RefreshOnUnknownKeyID: true,
 	})
 
 	// the server asks for an hour, which is longer than the minimum
@@ -603,15 +603,15 @@ func TestProviderRefreshOnUnknownKeyIDWaitsOutTheServersWait(t *testing.T) {
 	assert.Equal(t, int32(3), server.requests.Load())
 }
 
-func TestProviderRefreshEventCarriesTheKeySetSize(t *testing.T) {
+func TestKeySetProviderRefreshEventCarriesTheKeySetSize(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	first := jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil))
 	second := jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil), publicJWK(t, ecKey, "b", nil))
 	server := newKeyServer(t)
 	server.serveRaw(first)
 
-	// testProvider would consume the first event, which is wanted here
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{retrySource(server.URL)}}))
+	// testKeySetProvider would consume the first event, which is wanted here
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}}))
 	require.NoError(t, err)
 	fc := newTestClock()
 	p.clock = fc
@@ -645,11 +645,11 @@ func TestProviderRefreshEventCarriesTheKeySetSize(t *testing.T) {
 	assert.Equal(t, int64(len(second)), e.KeySetBytes)
 }
 
-func TestProviderRefreshEventHasNoKeySetSizeBeforeTheFirstLoad(t *testing.T) {
+func TestKeySetProviderRefreshEventHasNoKeySetSizeBeforeTheFirstLoad(t *testing.T) {
 	server := newKeyServer(t)
 	server.fail(http.StatusInternalServerError)
 
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{retrySource(server.URL)}}))
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{retrySource(server.URL)}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -661,7 +661,7 @@ func TestProviderRefreshEventHasNoKeySetSizeBeforeTheFirstLoad(t *testing.T) {
 	assert.Zero(t, e.KeySetBytes)
 }
 
-func TestProviderRefreshNotModified(t *testing.T) {
+func TestKeySetProviderRefreshNotModified(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	var since string
 	requests := 0
@@ -678,7 +678,7 @@ func TestProviderRefreshNotModified(t *testing.T) {
 	}))
 	defer server.Close()
 
-	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 	first := p.Status()[0].LastRetrieved
 
 	fc.Add(time.Second)
@@ -698,13 +698,13 @@ func TestProviderRefreshNotModified(t *testing.T) {
 	assert.NoError(t, status.LastErr)
 }
 
-func TestProviderRejectsAKeyIDAnotherSourceSupplies(t *testing.T) {
+func TestKeySetProviderRejectsAKeyIDAnotherSourceSupplies(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	first := newKeyServer(t, publicJWK(t, rsaKey, "shared", nil))
 	second := newKeyServer(t, publicJWK(t, ecKey, "shared", nil), publicJWK(t, ecKey, "only-second", nil))
 	second.gate = make(chan struct{})
 
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: first.URL}, {URI: second.URL}}}))
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{{URI: first.URL}, {URI: second.URL}}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -726,12 +726,12 @@ func TestProviderRejectsAKeyIDAnotherSourceSupplies(t *testing.T) {
 	assert.Equal(t, jwa.RSA(), k.KeyType(), "the first source's key must be the one kept")
 }
 
-func TestProviderFileSource(t *testing.T) {
+func TestKeySetProviderFileSource(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	path := filepath.Join(t.TempDir(), "keys.json")
 	require.NoError(t, os.WriteFile(path, jwkSetJSON(t, publicJWK(t, rsaKey, "a", nil)), 0o600))
 
-	p, fc, l := testProvider(t, Config{Sources: []RefreshSource{{URI: path}}})
+	p, fc, l := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: path}}})
 	assert.Equal(t, []string{"a"}, p.KeyIDs())
 	status := p.Status()[0]
 	assert.Zero(t, status.LastStatusCode)
@@ -746,12 +746,12 @@ func TestProviderFileSource(t *testing.T) {
 	assert.Equal(t, int64(len(second)), e.KeySetBytes)
 }
 
-func TestProviderRedactsCredentialsInEventsAndStatus(t *testing.T) {
+func TestKeySetProviderRedactsCredentialsInEventsAndStatus(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
 	uri := "http://user:hunter2@" + server.Listener.Addr().String() + "/"
 
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: uri}}}))
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{{URI: uri}}}))
 	require.NoError(t, err)
 	l := newEventListener()
 	p.AddListener(l)
@@ -764,11 +764,11 @@ func TestProviderRedactsCredentialsInEventsAndStatus(t *testing.T) {
 	assert.NotContains(t, p.Status()[0].URI, "hunter2")
 }
 
-func TestProviderCancelListener(t *testing.T) {
+func TestKeySetProviderCancelListener(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "a", nil))
 
-	p, err := New(withTestClients(Config{Sources: []RefreshSource{{URI: server.URL}}}))
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}}))
 	require.NoError(t, err)
 	fc := newTestClock()
 	p.clock = fc
@@ -784,13 +784,13 @@ func TestProviderCancelListener(t *testing.T) {
 	l.none(t)
 }
 
-func TestProviderVerifiesAToken(t *testing.T) {
+func TestKeySetProviderVerifiesAToken(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t,
 		publicJWK(t, rsaKey, "rsa", nil),
 		publicJWK(t, ecKey, "ec", map[string]any{"use": "sig", "alg": "ES256"}),
 	)
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	payload, err := jws.Verify(sign(t, rsaKey, jwa.RS256(), "rsa"), jws.WithKeyProvider(p))
 	require.NoError(t, err)
@@ -801,29 +801,29 @@ func TestProviderVerifiesAToken(t *testing.T) {
 	assert.Equal(t, "payload", string(payload))
 }
 
-func TestProviderRejectsATokenSignedByAnUnknownKey(t *testing.T) {
+func TestKeySetProviderRejectsATokenSignedByAnUnknownKey(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	_, err := jws.Verify(sign(t, ecKey, jwa.ES256(), "ec"), jws.WithKeyProvider(p))
 	assert.ErrorIs(t, err, ErrKeyNotFound)
 	assert.Equal(t, int32(1), server.requests.Load(), "an unknown key ID must not cause a request")
 }
 
-func TestProviderRejectsATokenWithTheWrongKey(t *testing.T) {
+func TestKeySetProviderRejectsATokenWithTheWrongKey(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	_, err := jws.Verify(sign(t, ecKey, jwa.ES256(), "rsa"), jws.WithKeyProvider(p))
 	assert.Error(t, err)
 }
 
-func TestProviderFetchKeysMissingKeyID(t *testing.T) {
+func TestKeySetProviderFetchKeysMissingKeyID(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	var sink recordingSink
 	err := p.FetchKeys(context.Background(), &sink, unverifiedSignature(t, `{"alg":"RS256"}`), nil)
@@ -831,10 +831,10 @@ func TestProviderFetchKeysMissingKeyID(t *testing.T) {
 	assert.Nil(t, sink.key)
 }
 
-func TestProviderFetchKeysMissingAlgorithm(t *testing.T) {
+func TestKeySetProviderFetchKeysMissingAlgorithm(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	var sink recordingSink
 	err := p.FetchKeys(context.Background(), &sink, unverifiedSignature(t, `{"kid":"rsa"}`), nil)
@@ -842,10 +842,10 @@ func TestProviderFetchKeysMissingAlgorithm(t *testing.T) {
 	assert.Nil(t, sink.key)
 }
 
-func TestProviderFetchKeysOffersTheKeyUnderTheHeaderAlgorithm(t *testing.T) {
+func TestKeySetProviderFetchKeysOffersTheKeyUnderTheHeaderAlgorithm(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	var sink recordingSink
 	err := p.FetchKeys(context.Background(), &sink, unverifiedSignature(t, `{"kid":"rsa","alg":"PS256"}`), nil)
@@ -857,19 +857,19 @@ func TestProviderFetchKeysOffersTheKeyUnderTheHeaderAlgorithm(t *testing.T) {
 	assert.Equal(t, "rsa", kid)
 }
 
-func TestProviderRejectsAKeyNotMarkedForSignatures(t *testing.T) {
+func TestKeySetProviderRejectsAKeyNotMarkedForSignatures(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "enc", map[string]any{"use": "enc"}))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	_, err := jws.Verify(sign(t, rsaKey, jwa.RS256(), "enc"), jws.WithKeyProvider(p))
 	assert.ErrorIs(t, err, ErrKeyUsage)
 }
 
-func TestProviderIgnoreKeyUsage(t *testing.T) {
+func TestKeySetProviderIgnoreKeyUsage(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "enc", map[string]any{"use": "enc"}))
-	p, _, _ := testProvider(t, Config{
+	p, _, _ := testKeySetProvider(t, KeySetConfig{
 		Sources: []RefreshSource{{URI: server.URL}},
 		Verify:  VerifyConfig{IgnoreKeyUsage: true},
 	})
@@ -878,10 +878,10 @@ func TestProviderIgnoreKeyUsage(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestProviderRejectsAnAlgorithmTheKeyDoesNotAllow(t *testing.T) {
+func TestKeySetProviderRejectsAnAlgorithmTheKeyDoesNotAllow(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", map[string]any{"alg": "RS256"}))
-	p, _, _ := testProvider(t, Config{Sources: []RefreshSource{{URI: server.URL}}})
+	p, _, _ := testKeySetProvider(t, KeySetConfig{Sources: []RefreshSource{{URI: server.URL}}})
 
 	_, err := jws.Verify(sign(t, rsaKey, jwa.PS256(), "rsa"), jws.WithKeyProvider(p))
 	assert.ErrorIs(t, err, ErrKeyAlgorithm)
@@ -890,10 +890,10 @@ func TestProviderRejectsAnAlgorithmTheKeyDoesNotAllow(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestProviderIgnoreKeyAlgorithm(t *testing.T) {
+func TestKeySetProviderIgnoreKeyAlgorithm(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", map[string]any{"alg": "RS256"}))
-	p, _, _ := testProvider(t, Config{
+	p, _, _ := testKeySetProvider(t, KeySetConfig{
 		Sources: []RefreshSource{{URI: server.URL}},
 		Verify:  VerifyConfig{IgnoreKeyAlgorithm: true},
 	})
@@ -902,12 +902,12 @@ func TestProviderIgnoreKeyAlgorithm(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestProviderRefreshOnUnknownKeyID(t *testing.T) {
+func TestKeySetProviderRefreshOnUnknownKeyID(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, fc, l := testProvider(t, Config{
-		Sources: []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
-		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+	p, fc, l := testKeySetProvider(t, KeySetConfig{
+		Sources:               []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
+		RefreshOnUnknownKeyID: true,
 	})
 
 	// the key rotates, and a token signed with it arrives after the minimum
@@ -924,12 +924,12 @@ func TestProviderRefreshOnUnknownKeyID(t *testing.T) {
 	assert.Equal(t, []string{"ec"}, e.NewKeyIDs)
 }
 
-func TestProviderRefreshOnUnknownKeyIDIsRateLimited(t *testing.T) {
+func TestKeySetProviderRefreshOnUnknownKeyIDIsRateLimited(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, fc, _ := testProvider(t, Config{
-		Sources: []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
-		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+	p, fc, _ := testKeySetProvider(t, KeySetConfig{
+		Sources:               []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
+		RefreshOnUnknownKeyID: true,
 	})
 
 	// inside the minimum interval, an unknown key ID fails without a request
@@ -946,12 +946,12 @@ func TestProviderRefreshOnUnknownKeyIDIsRateLimited(t *testing.T) {
 	assert.Equal(t, int32(2), server.requests.Load())
 }
 
-func TestProviderRefreshOnUnknownKeyIDStillMisses(t *testing.T) {
+func TestKeySetProviderRefreshOnUnknownKeyIDStillMisses(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, fc, _ := testProvider(t, Config{
-		Sources: []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
-		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+	p, fc, _ := testKeySetProvider(t, KeySetConfig{
+		Sources:               []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
+		RefreshOnUnknownKeyID: true,
 	})
 
 	fc.Add(10 * time.Minute)
@@ -960,10 +960,10 @@ func TestProviderRefreshOnUnknownKeyIDStillMisses(t *testing.T) {
 	assert.Equal(t, int32(2), server.requests.Load(), "the refresh happened, and the key still was not there")
 }
 
-func TestProviderRefreshOnUnknownKeyIDWhenNotRunning(t *testing.T) {
-	p, err := New(withTestClients(Config{
-		Sources: []RefreshSource{{URI: "https://keys.example.com/jwks"}},
-		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+func TestKeySetProviderRefreshOnUnknownKeyIDWhenNotRunning(t *testing.T) {
+	p, err := NewKeySetProvider(withTestClients(KeySetConfig{
+		Sources:               []RefreshSource{{URI: "https://keys.example.com/jwks"}},
+		RefreshOnUnknownKeyID: true,
 	}))
 	require.NoError(t, err)
 
@@ -972,12 +972,12 @@ func TestProviderRefreshOnUnknownKeyIDWhenNotRunning(t *testing.T) {
 	assert.ErrorIs(t, err, ErrKeyNotFound)
 }
 
-func TestProviderRefreshOnUnknownKeyIDHonorsTheCallersContext(t *testing.T) {
+func TestKeySetProviderRefreshOnUnknownKeyIDHonorsTheCallersContext(t *testing.T) {
 	rsaKey, ecKey := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, fc, _ := testProvider(t, Config{
-		Sources: []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
-		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+	p, fc, _ := testKeySetProvider(t, KeySetConfig{
+		Sources:               []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
+		RefreshOnUnknownKeyID: true,
 	})
 
 	server.gate = make(chan struct{})
@@ -1001,12 +1001,12 @@ func TestProviderRefreshOnUnknownKeyIDHonorsTheCallersContext(t *testing.T) {
 	_ = ecKey
 }
 
-func TestProviderRefreshOnUnknownKeyIDWhenStoppedMidLookup(t *testing.T) {
+func TestKeySetProviderRefreshOnUnknownKeyIDWhenStoppedMidLookup(t *testing.T) {
 	rsaKey, _ := testPrivateKeys(t)
 	server := newKeyServer(t, publicJWK(t, rsaKey, "rsa", nil))
-	p, fc, _ := testProvider(t, Config{
-		Sources: []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
-		Verify:  VerifyConfig{RefreshOnUnknownKeyID: true},
+	p, fc, _ := testKeySetProvider(t, KeySetConfig{
+		Sources:               []RefreshSource{{URI: server.URL, RefreshInterval: time.Hour, MinRefreshInterval: 10 * time.Minute}},
+		RefreshOnUnknownKeyID: true,
 	})
 
 	server.gate = make(chan struct{})

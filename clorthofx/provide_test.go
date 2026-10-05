@@ -73,21 +73,21 @@ func keyServer(t *testing.T) *httptest.Server {
 	return server
 }
 
-// waitForKeys blocks until the Provider has loaded a key.
-func waitForKeys(t *testing.T, p *clortho.Provider) {
+// waitForKeys blocks until the KeySetProvider has loaded a key.
+func waitForKeys(t *testing.T, p *clortho.KeySetProvider) {
 	require.Eventually(t, func() bool { return len(p.KeyIDs()) > 0 }, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestProvideRequiresAConfig(t *testing.T) {
-	var p *clortho.Provider
+	var p *clortho.KeySetProvider
 	app := fx.New(fx.NopLogger, Provide(), fx.Populate(&p))
-	assert.ErrorContains(t, app.Err(), "clortho.Config")
+	assert.ErrorContains(t, app.Err(), "clortho.KeySetConfig")
 	assert.Nil(t, p)
 }
 
 func TestProvideRejectsABadConfig(t *testing.T) {
-	var p *clortho.Provider
-	app := fx.New(fx.NopLogger, Provide(), fx.Supply(clortho.Config{}), fx.Populate(&p))
+	var p *clortho.KeySetProvider
+	app := fx.New(fx.NopLogger, Provide(), fx.Supply(clortho.KeySetConfig{}), fx.Populate(&p))
 	assert.ErrorIs(t, app.Err(), clortho.ErrNoKeySources)
 	assert.Nil(t, p)
 }
@@ -96,13 +96,13 @@ func TestProvideVerifiesATokenOnceStarted(t *testing.T) {
 	server := keyServer(t)
 
 	var (
-		p  *clortho.Provider
+		p  *clortho.KeySetProvider
 		kp jws.KeyProvider
 	)
 
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
+		fx.Supply(clortho.KeySetConfig{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Populate(&p, &kp),
 	)
 	require.NoError(t, app.Err())
@@ -125,10 +125,10 @@ func TestProvideVerifiesATokenOnceStarted(t *testing.T) {
 func TestProvideStopsTheProviderWithTheApplication(t *testing.T) {
 	server := keyServer(t)
 
-	var p *clortho.Provider
+	var p *clortho.KeySetProvider
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
+		fx.Supply(clortho.KeySetConfig{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Populate(&p),
 	)
 	app.RequireStart()
@@ -142,10 +142,10 @@ func TestProvideLogsRefreshes(t *testing.T) {
 	server := keyServer(t)
 	core, logs := observer.New(zapcore.InfoLevel)
 
-	var p *clortho.Provider
+	var p *clortho.KeySetProvider
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
+		fx.Supply(clortho.KeySetConfig{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Supply(zap.New(core)),
 		fx.Populate(&p),
 	)
@@ -163,10 +163,10 @@ func TestProvideRecordsMetrics(t *testing.T) {
 	registry := prometheus.NewPedanticRegistry()
 	factory := touchstone.NewFactory(touchstone.Config{}, zap.NewNop(), registry)
 
-	var p *clortho.Provider
+	var p *clortho.KeySetProvider
 	app := fxtest.New(t,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
+		fx.Supply(clortho.KeySetConfig{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Supply(factory),
 		fx.Populate(&p),
 	)
@@ -194,10 +194,10 @@ func TestProvideFailsWhenMetricsCollide(t *testing.T) {
 	_, err := factory.NewCounterVec(prometheus.CounterOpts{Name: clorthometrics.RefreshTotalName, Help: "taken"}, clorthometrics.SourceLabel)
 	require.NoError(t, err)
 
-	var p *clortho.Provider
+	var p *clortho.KeySetProvider
 	app := fx.New(fx.NopLogger,
 		Provide(),
-		fx.Supply(clortho.Config{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
+		fx.Supply(clortho.KeySetConfig{Sources: []clortho.RefreshSource{{URI: server.URL, Client: server.Client()}}}),
 		fx.Supply(factory),
 		fx.Populate(&p),
 	)

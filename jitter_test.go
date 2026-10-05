@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// jitterSource returns a source with the defaults already filled in, as New
-// would produce.
+// jitterSource returns a source with the defaults already filled in, as
+// NewKeySetProvider would produce.
 func jitterSource(interval, minInterval, maxInterval time.Duration, percentage float64) RefreshSource {
 	return RefreshSource{
 		URI:                "https://keys.example.com/jwks",

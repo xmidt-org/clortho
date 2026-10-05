@@ -65,16 +65,18 @@ func jwkSetJSON(t *testing.T, keys ...jwk.Key) []byte {
 	return data
 }
 
-// testClient returns a client for the http sources in tests.  New supplies no
-// default, so every http or https source has to be given one.
+// testClient returns a client for the http sources in tests.
+// NewKeySetProvider supplies no default, so every http or https source has to
+// be given one.
 func testClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }
 
 // withTestClients returns cfg with the test client set on every http or https
-// source that has none, so that a test about something else need not spell
-// one out.  Tests of the client requirement itself call New directly.
-func withTestClients(cfg Config) Config {
+// source that has none, so that a test about something else need not spell one
+// out.  Tests of the client requirement itself call NewKeySetProvider
+// directly.
+func withTestClients(cfg KeySetConfig) KeySetConfig {
 	sources := make([]RefreshSource, len(cfg.Sources))
 	copy(sources, cfg.Sources)
 	for i := range sources {

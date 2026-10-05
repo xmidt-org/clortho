@@ -16,7 +16,7 @@ import (
 // A source reached over http or https must be given the client to reach it
 // with, and clortho uses that client exactly as given.  This one is a sound
 // starting point for fetching keys.
-func ExampleNew() {
+func ExampleNewKeySetProvider() {
 	client := &http.Client{
 		// Bound the whole exchange.  Without a timeout, a key set server that
 		// stops answering stalls the refresh, and with RefreshOnUnknownKeyID
@@ -43,7 +43,7 @@ func ExampleNew() {
 		},
 	}
 
-	p, err := clortho.New(clortho.Config{
+	p, err := clortho.NewKeySetProvider(clortho.KeySetConfig{
 		Sources: []clortho.RefreshSource{
 			{URI: "https://issuer.example.com/keys", Client: client},
 
@@ -66,9 +66,9 @@ func ExampleNew() {
 }
 
 // There is no default client.  An http or https source without one is
-// rejected when the Provider is built, not when the first refresh fails.
-func ExampleNew_missingClient() {
-	_, err := clortho.New(clortho.Config{
+// rejected when the KeySetProvider is built, not when the first refresh fails.
+func ExampleNewKeySetProvider_missingClient() {
+	_, err := clortho.NewKeySetProvider(clortho.KeySetConfig{
 		Sources: []clortho.RefreshSource{{URI: "https://issuer.example.com/keys"}},
 	})
 

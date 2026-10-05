@@ -20,8 +20,8 @@ type ringEntry struct {
 	source int
 }
 
-// ring is the Provider's cache of keys, one map keyed by key ID.  The zero
-// value is ready to use.
+// ring is the KeySetProvider's cache of keys, one map keyed by key ID.  The
+// zero value is ready to use.
 type ring struct {
 	lock sync.RWMutex
 	keys map[string]ringEntry

@@ -51,14 +51,14 @@ type refreshTask struct {
 	index  int
 	source RefreshSource
 	jitter jitterer
-	p      *Provider
+	p      *KeySetProvider
 
 	// requests carries early refresh requests.  Each carries a channel that is
 	// closed once the request has been handled, whether or not a refresh ran.
 	requests chan chan struct{}
 }
 
-func newRefreshTask(p *Provider, index int) *refreshTask {
+func newRefreshTask(p *KeySetProvider, index int) *refreshTask {
 	return &refreshTask{
 		index:    index,
 		source:   p.sources[index],
@@ -149,8 +149,8 @@ func (t *refreshTask) refresh(ctx context.Context) time.Duration {
 	c, err := load(ctx, t.source, since)
 	if err != nil && ctx.Err() != nil {
 		// Stop canceled the loop while the load was in flight.  that is the
-		// Provider abandoning the attempt, not the source failing, so nothing is
-		// recorded or dispatched.  the interval is an ordinary one, never zero,
+		// KeySetProvider abandoning the attempt, not the source failing, so nothing
+		// is recorded or dispatched.  the interval is an ordinary one, never zero,
 		// so that run finds the canceled context before the timer can fire.
 		return t.jitter.nextInterval(0, err)
 	}

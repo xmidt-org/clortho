@@ -29,7 +29,7 @@ type jitterer struct {
 }
 
 // newJitterer constructs a jitterer for a RefreshSource whose defaults have
-// already been filled in by New.
+// already been filled in by NewKeySetProvider.
 func newJitterer(source RefreshSource) jitterer {
 	j := jitterer{
 		minInterval: source.MinRefreshInterval,

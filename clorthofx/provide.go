@@ -18,14 +18,14 @@ import (
 const Module = "clortho"
 
 // ProviderIn enumerates the components involved in creating a
-// *clortho.Provider.
+// *clortho.KeySetProvider.
 type ProviderIn struct {
 	fx.In
 
 	// Config is required.  The application unmarshals its own settings and
 	// maps them onto this, which is also where it hands each source the
 	// *http.Client it wants.
-	Config clortho.Config
+	Config clortho.KeySetConfig
 
 	// Logger, when present, receives a log entry for every refresh through a
 	// clorthozap.Listener.
@@ -38,10 +38,10 @@ type ProviderIn struct {
 	Lifecycle fx.Lifecycle
 }
 
-// newProvider creates the Provider, attaches the optional listeners, and
+// newProvider creates the KeySetProvider, attaches the optional listeners, and
 // binds Start and Stop to the application lifecycle.
-func newProvider(in ProviderIn) (*clortho.Provider, error) {
-	p, err := clortho.New(in.Config)
+func newProvider(in ProviderIn) (*clortho.KeySetProvider, error) {
+	p, err := clortho.NewKeySetProvider(in.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -72,31 +72,31 @@ func newProvider(in ProviderIn) (*clortho.Provider, error) {
 	return p, nil
 }
 
-// newKeyProvider exposes the Provider under the interface a bascule token
-// parser injects.
-func newKeyProvider(p *clortho.Provider) jws.KeyProvider {
+// newKeyProvider exposes the KeySetProvider under the interface a bascule
+// token parser injects.
+func newKeyProvider(p *clortho.KeySetProvider) jws.KeyProvider {
 	return p
 }
 
 // Provide bootstraps the clortho module.  The application must supply a
-// clortho.Config; an optional *zap.Logger and *touchstone.Factory enable
+// clortho.KeySetConfig; an optional *zap.Logger and *touchstone.Factory enable
 // logging and metrics for refreshes.
 //
 // This module provides:
 //
-//   - *clortho.Provider
+//   - *clortho.KeySetProvider
 //     Bound to the application lifecycle, so its sources are refreshed from
 //     Start until Stop.  Inject it for Status and KeyIDs, e.g. from a health
 //     endpoint.
 //
 //   - jws.KeyProvider
-//     The same Provider, under the interface a basculejwt token parser takes
-//     via jwt.WithKeyProvider.  An application that provides its own
+//     The same KeySetProvider, under the interface a basculejwt token parser
+//     takes via jwt.WithKeyProvider.  An application that provides its own
 //     jws.KeyProvider will get a duplicate-provide error from fx; use
 //     fx.Decorate or a named value to combine the two.
 //
-// The Provider is constructed eagerly, so a Config problem fails the
-// application at startup rather than when a token first arrives.
+// The KeySetProvider is constructed eagerly, so a KeySetConfig problem fails
+// the application at startup rather than when a token first arrives.
 func Provide() fx.Option {
 	return fx.Module(
 		Module,
@@ -105,7 +105,7 @@ func Provide() fx.Option {
 			newKeyProvider,
 		),
 		fx.Invoke(
-			func(*clortho.Provider) {},
+			func(*clortho.KeySetProvider) {},
 		),
 	)
 }

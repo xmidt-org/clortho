@@ -12,26 +12,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewRequiresASource(t *testing.T) {
-	p, err := New(Config{})
+func TestNewKeySetProviderRequiresASource(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{})
 	assert.ErrorIs(t, err, ErrNoKeySources)
 	assert.Nil(t, p)
 }
 
-func TestNewRejectsAnEmptyURI(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{}}})
+func TestNewKeySetProviderRejectsAnEmptyURI(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{}}})
 	assert.Error(t, err)
 	assert.Nil(t, p)
 }
 
-func TestNewRejectsAnUnsupportedScheme(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "ftp://keys.example.com/jwks"}}})
+func TestNewKeySetProviderRejectsAnUnsupportedScheme(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: "ftp://keys.example.com/jwks"}}})
 	assert.ErrorIs(t, err, ErrUnsupportedScheme)
 	assert.Nil(t, p)
 }
 
-func TestNewRejectsADuplicateSource(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{
+func TestNewKeySetProviderRejectsADuplicateSource(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{
 		{URI: "https://keys.example.com/jwks", Client: testClient()},
 		{URI: "https://keys.example.com/jwks", Client: testClient()},
 	}})
@@ -40,42 +40,43 @@ func TestNewRejectsADuplicateSource(t *testing.T) {
 	assert.Nil(t, p)
 }
 
-func TestNewRequiresAClientForAnHTTPSource(t *testing.T) {
+func TestNewKeySetProviderRequiresAClientForAnHTTPSource(t *testing.T) {
 	for _, uri := range []string{"http://keys.example.com/jwks", "https://keys.example.com/jwks"} {
-		p, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
+		p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: uri}}})
 		assert.ErrorIs(t, err, ErrMissingClient, uri)
 		assert.ErrorContains(t, err, uri)
 		assert.Nil(t, p)
 	}
 }
 
-func TestNewRedactsACredentialedURIWhenTheClientIsMissing(t *testing.T) {
+func TestNewKeySetProviderRedactsACredentialedURIWhenTheClientIsMissing(t *testing.T) {
 	uri := "https://user:" + "hunter2" + "@keys.example.com/jwks"
-	_, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
+	_, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: uri}}})
 	require.ErrorIs(t, err, ErrMissingClient)
 	assert.NotContains(t, err.Error(), "hunter2")
 	assert.Contains(t, err.Error(), "user:xxxxx@")
 }
 
-func TestNewRejectsAClientOnAFileSource(t *testing.T) {
+func TestNewKeySetProviderRejectsAClientOnAFileSource(t *testing.T) {
 	for _, uri := range []string{"file:///etc/keys.json", "/etc/other-keys.json"} {
-		p, err := New(Config{Sources: []RefreshSource{{URI: uri, Client: testClient()}}})
+		p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: uri, Client: testClient()}}})
 		assert.ErrorIs(t, err, ErrUnusedClient, uri)
 		assert.ErrorContains(t, err, uri)
 		assert.Nil(t, p)
 	}
 }
 
-func TestNewCatchesAnHTTPURIWrittenWithoutItsScheme(t *testing.T) {
-	// with no scheme this reads as a file path.  the client that came with it
-	// is what gives the mistake away, at New instead of at the first refresh.
-	p, err := New(Config{Sources: []RefreshSource{{URI: "keys.example.com/jwks", Client: testClient()}}})
+func TestNewKeySetProviderCatchesAnHTTPURIWrittenWithoutItsScheme(t *testing.T) {
+	// with no scheme this reads as a file path.  the client that came with it is
+	// what gives the mistake away, at NewKeySetProvider instead of at the first
+	// refresh.
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: "keys.example.com/jwks", Client: testClient()}}})
 	assert.ErrorIs(t, err, ErrUnusedClient)
 	assert.Nil(t, p)
 }
 
-func TestNewNeedsNoClientForAFileSource(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{
+func TestNewKeySetProviderNeedsNoClientForAFileSource(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{
 		{URI: "file:///etc/keys.json"},
 		{URI: "/etc/other-keys.json"},
 	}})
@@ -87,8 +88,8 @@ func TestNewNeedsNoClientForAFileSource(t *testing.T) {
 	assert.Nil(t, p.sources[1].Client)
 }
 
-func TestNewReportsEveryProblemAtOnce(t *testing.T) {
-	_, err := New(Config{Sources: []RefreshSource{
+func TestNewKeySetProviderReportsEveryProblemAtOnce(t *testing.T) {
+	_, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{
 		{URI: "ftp://keys.example.com/jwks"},
 		{},
 		{URI: "https://keys.example.com/other"},
@@ -98,16 +99,16 @@ func TestNewReportsEveryProblemAtOnce(t *testing.T) {
 	assert.ErrorIs(t, err, ErrMissingClient)
 }
 
-func TestNewRedactsACredentialedURIInErrors(t *testing.T) {
+func TestNewKeySetProviderRedactsACredentialedURIInErrors(t *testing.T) {
 	uri := "ftp://user:" + "hunter2" + "@keys.example.com/jwks"
-	_, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
+	_, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: uri}}})
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "hunter2")
 	assert.Contains(t, err.Error(), "user:xxxxx@")
 }
 
-func TestNewAcceptsFileHTTPAndHTTPS(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{
+func TestNewKeySetProviderAcceptsFileHTTPAndHTTPS(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{
 		{URI: "file:///etc/keys.json"},
 		{URI: "/etc/other-keys.json"},
 		{URI: "http://keys.example.com/jwks", Client: testClient()},
@@ -124,9 +125,9 @@ func TestNewAcceptsFileHTTPAndHTTPS(t *testing.T) {
 	assert.Equal(t, "https://keys.example.com/jwks", status[3].URI)
 }
 
-func TestNewFillsDefaults(t *testing.T) {
+func TestNewKeySetProviderFillsDefaults(t *testing.T) {
 	client := &http.Client{}
-	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", Client: client}}})
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", Client: client}}})
 	require.NoError(t, err)
 
 	src := p.sources[0]
@@ -141,9 +142,9 @@ func TestNewFillsDefaults(t *testing.T) {
 	assert.Equal(t, http.Client{}, *src.Client)
 }
 
-func TestNewKeepsExplicitValues(t *testing.T) {
+func TestNewKeySetProviderKeepsExplicitValues(t *testing.T) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	p, err := New(Config{Sources: []RefreshSource{{
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{
 		URI:                "https://keys.example.com/jwks",
 		RefreshInterval:    time.Hour,
 		MinRefreshInterval: time.Minute,
@@ -163,14 +164,14 @@ func TestNewKeepsExplicitValues(t *testing.T) {
 	assert.Equal(t, int64(1024), src.MaxResponseBytes)
 }
 
-func TestNewReplacesAnOutOfRangeJitter(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", Client: testClient(), JitterPercentage: 150}}})
+func TestNewKeySetProviderReplacesAnOutOfRangeJitter(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: "https://keys.example.com/jwks", Client: testClient(), JitterPercentage: 150}}})
 	require.NoError(t, err)
 	assert.Equal(t, DefaultJitterPercentage, p.sources[0].JitterPercentage)
 }
 
-func TestNewRaisesAMaxBelowTheMin(t *testing.T) {
-	p, err := New(Config{Sources: []RefreshSource{{
+func TestNewKeySetProviderRaisesAMaxBelowTheMin(t *testing.T) {
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{
 		URI:                "https://keys.example.com/jwks",
 		Client:             testClient(),
 		MinRefreshInterval: time.Hour,
@@ -180,18 +181,18 @@ func TestNewRaisesAMaxBelowTheMin(t *testing.T) {
 	assert.Equal(t, time.Hour, p.sources[0].MaxRefreshInterval)
 }
 
-func TestNewDoesNotShareTheCallersSlice(t *testing.T) {
+func TestNewKeySetProviderDoesNotShareTheCallersSlice(t *testing.T) {
 	sources := []RefreshSource{{URI: "https://keys.example.com/jwks", Client: testClient()}}
-	p, err := New(Config{Sources: sources})
+	p, err := NewKeySetProvider(KeySetConfig{Sources: sources})
 	require.NoError(t, err)
 
 	sources[0].URI = "changed"
 	assert.Equal(t, "https://keys.example.com/jwks", p.Status()[0].URI)
 }
 
-func TestNewRejectsAnUnparseableURI(t *testing.T) {
+func TestNewKeySetProviderRejectsAnUnparseableURI(t *testing.T) {
 	uri := "http://user:" + "hunter2" + "@[::1"
-	p, err := New(Config{Sources: []RefreshSource{{URI: uri}}})
+	p, err := NewKeySetProvider(KeySetConfig{Sources: []RefreshSource{{URI: uri}}})
 	assert.ErrorIs(t, err, ErrUnsupportedScheme)
 	assert.ErrorContains(t, err, "source 0")
 	assert.NotContains(t, err.Error(), "hunter2")
