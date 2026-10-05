@@ -13,8 +13,12 @@ This library, running inside a service that verifies tokens. In prose it names t
 _Avoid_: the provider (ambiguous, see **Provider**), the client, the verifier
 
 **Provider**:
-The `clortho.Provider` value a service builds with `clortho.New`: the in-process object that owns the **Ring**, runs every **Refresh**, and answers each **Lookup**. It is named for the jwx interface it satisfies, `jws.KeyProvider`, and is never the remote end. Wherever a bare "provider" could be read as the **Key Set Server**, write "clortho" or "the clortho.Provider".
+Any of the three kinds of object clortho makes to answer a **Lookup**: a **Key Set Provider**, a **Per-Key Provider**, or a **Fixed Key Provider**. It always lives inside the verifying service and is never the remote end. It is named for the jwx interface every kind satisfies, `jws.KeyProvider`. Name the kind whenever the difference matters, and wherever a bare "provider" could be read as a key server, write "clortho" instead.
 _Avoid_: provider for the server that publishes keys, service provider, key provider
+
+**Key Set Provider**:
+The kind of **Provider** that reads whole **Key Sets** from its **Key Set Sources** on a schedule and holds them on a **Ring**. A **Token** cannot make it send a request, apart from an **Early Refresh** when that is turned on.
+_Avoid_: provider alone, refresher, poller
 
 **Key Set Source**:
 One configured location that clortho reads a **Key Set** from: an http or https URL, or a file path. It is one `RefreshSource` entry in `Config.Sources`, and almost always a **Key Set Server**. "Source" alone means this.
@@ -47,7 +51,7 @@ The complete document a **Key Set Source** serves: a JWK set, or a single JWK tr
 _Avoid_: keys file, key list, content, body (the body is the bytes, the key set is what they parse to)
 
 **Ring**:
-The **Provider**'s in-memory cache of **Keys**: one map from **Key ID** to key, fed by every **Key Set Source**. A key ID names exactly one key on it, so two sources may not supply the same one.
+A **Key Set Provider**'s in-memory cache of **Keys**: one map from **Key ID** to key, fed by every **Key Set Source**. A key ID names exactly one key on it, so two sources may not supply the same one.
 _Avoid_: key ring (the injectable `KeyRing` type is gone), cache, store
 
 **Last Good Keys**:
@@ -77,18 +81,18 @@ _Avoid_: backoff (the wait does not grow with repeated failures)
 
 **Server's Wait**:
 The pause a **Key Set Server** asks for with a `Retry-After` header on a 429 or 503 response. clortho honors it even when it is shorter than `MinRefreshInterval`, and caps it at `MaxRefreshInterval`.
-_Avoid_: backoff, cooldown, rate limit (that is the limit on an **Early Refresh**)
+_Avoid_: backoff, rate limit (that is the limit on an **Early Refresh**), cool-down (that is a **Per-Key Provider**'s wait)
 
 **Rejected Key Set**:
 A **Key Set** the source served in full and clortho would not accept. It holds a symmetric key, a key with no **Key ID**, or a key ID that appears twice or that another source already supplies, or it is larger than `MaxResponseBytes`. It gets no **Retry**, because the source would serve the same set again, unless the source has **Never Loaded**.
 _Avoid_: refused key set, bad set, invalid content, policy failure
 
 **Never Loaded**:
-The state of a **Key Set Source** that has had no successful **Refresh** since its **Provider** was built, so it has no **Last Good Keys**. Every **Failed Refresh** of such a source gets a **Retry**, a **Rejected Key Set** included.
+The state of a **Key Set Source** that has had no successful **Refresh** since its **Key Set Provider** was built, so it has no **Last Good Keys**. Every **Failed Refresh** of such a source gets a **Retry**, a **Rejected Key Set** included.
 _Avoid_: cold, empty, uninitialized
 
 **Early Refresh**:
-A **Refresh** triggered by a **Lookup** for an **Unknown Key ID**, when `VerifyConfig.RefreshOnUnknownKeyID` is on. It is limited to one per source per `MinRefreshInterval`, never runs inside a **Server's Wait**, and is the only way a **Token** can cause a request.
+A **Refresh** triggered by a **Lookup** for an **Unknown Key ID**, when `KeySetConfig.RefreshOnUnknownKeyID` is on. It is limited to one per source per `MinRefreshInterval`, never runs inside a **Server's Wait**, and is the only way a **Token** can make a **Key Set Provider** send a request.
 _Avoid_: on-demand fetch, resolve, lazy load
 
 **Abandoned Refresh**:
@@ -99,14 +103,50 @@ _Avoid_: canceled refresh, failed refresh
 The random spread applied to every wait so that a fleet that started together does not reach the **Key Set Server** in lockstep. On the **Normal Schedule** it runs either side of the interval, on a server's max-age only earlier, and on a **Retry** only later.
 _Avoid_: fuzz, randomization
 
+### Fetching one key at a time
+
+**Per-Key Provider**:
+The kind of **Provider** that fetches one **Key** at a time, by the **Key ID** a **Token** names, from a server that serves single keys and no **Key Set**. It is the only kind a token can make send a request as a matter of course.
+_Avoid_: resolver, key provider, on-demand provider
+
+**Fetch**:
+One request by a **Per-Key Provider** for one **Key**, named by its **Key ID**. It is the per-key counterpart of a **Refresh**, and it happens because a **Token** named a key the provider does not hold.
+_Avoid_: resolve, refresh (that reads a whole **Key Set**), lookup (that is jwx asking, and may need no request)
+
+**Fetch Event**:
+The report of one **Fetch**, delivered to every listener for fetches: the **Key ID**, where it was asked for, and the error if there was one.
+_Avoid_: resolve event
+
+**Allowed Key ID**:
+A **Key ID** the operator has listed as one a **Per-Key Provider** may always fetch. It is exempt from the **Fetch Rate Limit**.
+_Avoid_: known key ID (clashes with **Unknown Key ID**, which means not yet held), whitelisted key ID, valid key ID
+
+**Fetch Rate Limit**:
+The cap on how often a **Per-Key Provider** may fetch for **Key IDs** that are not **Allowed Key IDs**. It exists because such an ID comes from a **Token** nobody has verified, so a flood of invented IDs would otherwise become a flood of requests. It may be zero, in which case only allowed key IDs are ever fetched.
+_Avoid_: rate limit alone (that is the limit on an **Early Refresh**), throttle, budget
+
+**Cool-Down**:
+The wait after a **Per-Key Provider** fails to fetch a **Key ID**, before that ID may be tried again. It is long when the server says there is no such key, and short when the server could not answer.
+_Avoid_: backoff (the wait does not grow), retry wait, **Server's Wait** (that is a pause the server asked for)
+
+### Keys given in configuration
+
+**Fixed Key**:
+A **Key** written into the verifying service's own configuration, as PEM or JWK text. It is never fetched, so it changes only when the configuration does.
+_Avoid_: static key, hard-coded key, local key, embedded key
+
+**Fixed Key Provider**:
+The kind of **Provider** that serves **Fixed Keys** and nothing else. It never sends a request, for any reason.
+_Avoid_: static provider, local provider
+
 ### Verifying
 
 **Lookup**:
-jwx asking the **Provider**, through `FetchKeys`, for the **Key** that matches a **Token**'s **Key ID**. It is answered from the **Ring** and reads no source.
+jwx asking a **Provider**, through `FetchKeys`, for the **Key** that matches a **Token**'s **Key ID**. A **Key Set Provider** and a **Fixed Key Provider** answer from what they already hold. A **Per-Key Provider** may need a **Fetch** first.
 _Avoid_: fetch (despite the method name), resolve
 
 **Unknown Key ID**:
-A **Key ID** from a **Token** that is not on the **Ring**. The **Lookup** fails with `ErrKeyNotFound`, unless an **Early Refresh** puts the key there first.
+A **Key ID** from a **Token** that the **Provider** being asked does not hold. The **Lookup** fails with `ErrKeyNotFound`, unless an **Early Refresh** or a **Fetch** obtains the key first.
 _Avoid_: missing key, cache miss
 
 **Verify Policy**:
@@ -124,17 +164,21 @@ A sink for **Refresh Events**. `clorthozap` logs them and `clorthometrics` count
 _Avoid_: observer, subscriber, hook
 
 **Status**:
-The per-source record of the most recent **Refresh**: when the source last succeeded, the last HTTP status, and the last error. It is what a readiness check reads to decide whether the **Provider** has keys.
+The per-source record of the most recent **Refresh**: when the source last succeeded, the last HTTP status, and the last error. It is what a readiness check reads to decide whether a **Key Set Provider** has keys.
 _Avoid_: health, state
 
 ## Relationships
 
-- A service builds one **Provider**. A **Provider** has exactly one **Ring** and one or more **Key Set Sources**.
+- A service builds any number of **Providers**, of any mix of kinds, and jwx asks them in the order the service lists them.
+- A **Key Set Provider** has exactly one **Ring** and one or more **Key Set Sources**.
+- A **Per-Key Provider** has exactly one server it fetches from, and zero or more **Allowed Key IDs**.
+- A **Fixed Key Provider** has one or more **Fixed Keys**.
 - A **Key Set Source** serves one **Key Set**, which holds one or more **Keys**. Each **Key** has one **Key ID**, unique across the whole **Ring**.
 - Each **Key Set Source** has its own refresh loop. Every **Refresh** it runs is a **Scheduled Refresh**, a **Retry**, or an **Early Refresh**.
 - A **Failed Refresh** is followed by a **Retry**. The one exception is a **Rejected Key Set** from a source that has loaded before, which waits for the **Normal Schedule**.
-- A **Lookup** reads the **Ring** and nothing else. Only an **Early Refresh** connects a **Token** to a **Key Set Source**.
-- The **Issuer** and the **Key Set Server** are often the same system. The **Provider** is never either of them.
+- For a **Key Set Provider**, a **Lookup** reads the **Ring** and nothing else. Only an **Early Refresh** connects a **Token** to a **Key Set Source**.
+- For a **Per-Key Provider**, a **Lookup** for an **Unknown Key ID** leads to a **Fetch**, unless the **Fetch Rate Limit** or a **Cool-Down** refuses it.
+- The **Issuer** and the **Key Set Server** are often the same system. A **Provider** is never either of them.
 
 ## Example dialogue
 
@@ -145,13 +189,13 @@ _Avoid_: health, state
 > **Dev:** "And if the service started while that bad set was published?"
 > **Maintainer:** "Then the source has **Never Loaded** and there are no keys to serve, so it does get a **Retry** after the minimum, and keeps getting one until someone fixes the set."
 > **Dev:** "Could a flood of tokens with made-up key IDs make us hammer themis?"
-> **Maintainer:** "No. A **Lookup** reads the **Ring** and makes no request. With `RefreshOnUnknownKeyID` on, an **Unknown Key ID** can trigger an **Early Refresh**, but at most one per source per minimum interval, and none during a **Server's Wait**."
+> **Maintainer:** "That depends on the kind of **Provider**. With a **Key Set Provider**, no. A **Lookup** reads the **Ring** and makes no request, and an **Early Refresh**, if it is on, happens at most once per source per minimum interval. A **Per-Key Provider** is different: an **Unknown Key ID** leads to a **Fetch**. That is why it has a **Fetch Rate Limit**, and why an **Allowed Key ID** is exempt from it, so a flood cannot crowd out a key we were told to trust."
 
 ## Flagged ambiguities
 
-- "provider" was used for both the `clortho.Provider` and the server that publishes keys, as in "the provider probably knows best". Resolved: **Provider** is always the clortho object. The remote end is the **Key Set Source**, or the **Key Set Server** when HTTP is the point. Prose that could be misread says "clortho" or "the clortho.Provider".
+- "provider" was used for both clortho's own object and the server that publishes keys, as in "the provider probably knows best". Resolved: a **Provider** is always one of clortho's own objects, of whichever kind. The remote end is the **Key Set Source**, or the **Key Set Server** when HTTP is the point. Prose that could be misread says "clortho" or names the kind of provider.
 - "source" and "server" are not synonyms. A **Key Set Source** may be a file. "Server" is used only where the behavior needs HTTP.
-- "fetch" suggests a network request, but `FetchKeys` is jwx's name for a **Lookup** and makes none. Reading a source is a **Refresh**.
+- "fetch" suggests a network request, but `FetchKeys` is jwx's name for a **Lookup**, which may need none. Reading a whole source is a **Refresh**. A **Fetch** is a **Per-Key Provider**'s request for one key.
 - "key" was used for both the material and its identifier. Resolved: **Key** is the material and **Key ID** is the string.
 - "refused" and "rejected" were both used for a key set clortho would not accept. Resolved: **Rejected Key Set**. A single **Key** can also fail the **Verify Policy** at a **Lookup**; that is a failed lookup, not a **Failed Refresh**.
 - "retry" is not backoff. The wait before a **Retry** is the same after the tenth failure as after the first, unless the server sends a different **Server's Wait**.
