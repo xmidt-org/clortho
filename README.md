@@ -47,9 +47,10 @@ configuration, as PEM or as JWKs.  It never sends a request.
 Each kind is configured by a plain struct, `KeySetConfig`, `PerKeyConfig`, or
 `FixedKeyConfig`, with no functional options.  For the two kinds that reach a
 server, the caller supplies the `*http.Client`.  `clorthozap` and
-`clorthometrics` log and count what those two do, and `clorthofx` wires a
-`KeySetProvider` into a
-[go.uber.org/fx](https://github.com/uber-go/fx) application.
+`clorthometrics` log and count what those two do.  `clorthofx` builds any
+number of providers of every kind for a
+[go.uber.org/fx](https://github.com/uber-go/fx) application, and presents
+them to it as one.
 
 The package documentation at
 [pkg.go.dev/github.com/xmidt-org/clortho](https://pkg.go.dev/github.com/xmidt-org/clortho)

@@ -93,6 +93,7 @@
 // match the token; VerifyConfig turns either check off.
 //
 // Errors carry sentinels for errors.Is.  clorthozap and clorthometrics log and
-// count what the two kinds of provider that reach a server do, and clorthofx
-// wires a KeySetProvider into a go.uber.org/fx application.
+// count what the two kinds of provider that reach a server do.  clorthofx
+// builds any number of providers of every kind for a go.uber.org/fx
+// application, and presents them to it as one.
 package clortho

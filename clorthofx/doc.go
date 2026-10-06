@@ -3,9 +3,9 @@
 
 // Package clorthofx provides integration with go.uber.org/fx.
 //
-// Provide builds a *clortho.KeySetProvider from the application's
-// clortho.KeySetConfig,
-// binds it to the application lifecycle, and also provides it as a
-// jws.KeyProvider for a bascule token parser.  An optional *zap.Logger and
-// *touchstone.Factory enable logging and metrics for refreshes.  See Provide.
+// Provide builds every provider the application's Config asks for, of any of
+// the three kinds clortho makes, and presents them to the application as one
+// jws.KeyProvider for a bascule token parser.  It binds each KeySetProvider
+// to the application lifecycle.  An optional *zap.Logger and
+// *touchstone.Factory enable logging and metrics.  See Provide.
 package clorthofx
