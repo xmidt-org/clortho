@@ -20,6 +20,9 @@ linters:
     errorlint:
       # Report non-wrapping error creation using fmt.Errorf
       errorf: false
+    goconst:
+      min-len: 5
+      min-occurrences: 5
     gosec:
       excludes:
         # don't check math/rand vs crypto/rand

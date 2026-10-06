@@ -26,18 +26,35 @@ By participating, you agree to this Code.
 
 ## Details
 
-clortho fetches, caches, and refreshes the keys a service needs to verify JWS
-signatures, such as those on JWTs, and exposes them to
-[jwx](https://github.com/lestrrat-go/jwx) as a `jws.KeyProvider`.  A `KeyRing`
-holds the keys, a `Refresher` keeps it current from configured sources, and
-`NewKeyProvider` wraps it for verification.  An optional `Resolver` fetches
-individual keys on demand for callers that need one, and `clorthofx` wires all
-of it into a [go.uber.org/fx](https://github.com/uber-go/fx) application.
+clortho supplies the keys a service needs to verify JWS signatures, such as
+those on JWTs, as a `jws.KeyProvider` for
+[jwx](https://github.com/lestrrat-go/jwx).  It makes three kinds of provider,
+for three ways a service can come by its keys.
+
+A `KeySetProvider` is for a server that publishes its keys as a set.  It polls
+each configured source for its complete key set, keeps the keys in one map by
+key ID, and answers jwx's `FetchKeys` from that map.  It never fetches a key
+on demand, so a token cannot cause a request.
+
+A `PerKeyProvider` is for a server that serves one key per request and no key
+set.  It fetches a key when a token names it, and holds it.  Because that key
+ID comes from a token nobody has verified yet, its configuration limits how
+often such fetches can happen.
+
+A `FixedKeyProvider` is for keys written into the service's own
+configuration, as PEM or as JWKs.  It never sends a request.
+
+Each kind is configured by a plain struct, `KeySetConfig`, `PerKeyConfig`, or
+`FixedKeyConfig`, with no functional options.  For the two kinds that reach a
+server, the caller supplies the `*http.Client`.  `clorthozap` and
+`clorthometrics` log and count what those two do.  `clorthofx` builds any
+number of providers of every kind for a
+[go.uber.org/fx](https://github.com/uber-go/fx) application, and presents
+them to it as one.
 
 The package documentation at
 [pkg.go.dev/github.com/xmidt-org/clortho](https://pkg.go.dev/github.com/xmidt-org/clortho)
-is the full overview, including which configuration feeds verification and
-which does not.
+has the full overview, including the readiness and rotation behavior.
 
 ## Install
 

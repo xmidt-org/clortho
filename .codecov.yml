@@ -9,6 +9,8 @@ coverage:
 ignore:
   - "*_test.go"
   - "vendor"
+  - "cmd/keyset/main.go"
+  - "cmd/perkey/main.go"
 
 fixes:
   - "github.com/xmidt-org/clortho/::"

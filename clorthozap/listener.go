@@ -32,11 +32,11 @@ func WithLogger(logger *zap.Logger) ListenerOption {
 	})
 }
 
-// WithLevel sets the log level for non-error events.  By default, key refresh
-// and resolve events are logged at INFO level.
+// WithLevel sets the log level for successful refreshes and fetches.  By
+// default, they are logged at INFO level.
 //
-// Errors are always logged at ERROR level.  Error events are not controlled
-// by this option.
+// A failed refresh or fetch is always logged at ERROR level, regardless of
+// this option.
 func WithLevel(level zapcore.Level) ListenerOption {
 	return listenerOptionFunc(func(l *Listener) error {
 		l.level = level
@@ -44,15 +44,19 @@ func WithLevel(level zapcore.Level) ListenerOption {
 	})
 }
 
-// Listener is both a clortho.RefreshListener and a clortho.ResolveListener
-// that logs information about events via a supplied zap logger.
+// Listener logs what clortho's providers do via a zap logger.  It is a
+// clortho.Listener, for the refreshes of a KeySetProvider, and a
+// clortho.FetchListener, for the fetches of a PerKeyProvider.  Events carry
+// key IDs only, so nothing logged here is key material.
 type Listener struct {
 	logger *zap.Logger
 	level  zapcore.Level
 }
 
-var _ clortho.RefreshListener = (*Listener)(nil)
-var _ clortho.ResolveListener = (*Listener)(nil)
+var (
+	_ clortho.Listener      = (*Listener)(nil)
+	_ clortho.FetchListener = (*Listener)(nil)
+)
 
 // NewListener constructs a *Listener that outputs to the supplied logger.
 func NewListener(options ...ListenerOption) (l *Listener, err error) {
@@ -76,8 +80,8 @@ func NewListener(options ...ListenerOption) (l *Listener, err error) {
 	return
 }
 
-// OnRefreshEvent outputs structured logging about the event to the logger
-// established via WithLogger when this listener was created.
+// OnRefreshEvent logs the outcome of one refresh: the source, the key IDs it
+// now supplies, what was added and removed, and the error if it failed.
 func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 	level := l.level
 	if event.Err != nil {
@@ -89,30 +93,27 @@ func (l *Listener) OnRefreshEvent(event clortho.RefreshEvent) {
 		return
 	}
 
-	// save a couple of allocations by using one big slice for key IDs
-	keyIDs := make([]string, 0, event.Keys.Len()+event.New.Len()+event.Deleted.Len())
-	keyIDs = event.Keys.AppendKeyIDs(keyIDs)
-	keyIDs = event.New.AppendKeyIDs(keyIDs)
-	keyIDs = event.Deleted.AppendKeyIDs(keyIDs)
-
 	ce.Write(
 		zap.String("uri", event.URI),
-		zap.Strings("keys", keyIDs[0:event.Keys.Len()]),
-		zap.Strings("new", keyIDs[event.Keys.Len():event.Keys.Len()+event.New.Len()]),
-		zap.Strings("deleted", keyIDs[event.Keys.Len()+event.New.Len():]),
+		zap.Strings("keyIDs", event.KeyIDs),
+		zap.Strings("new", event.NewKeyIDs),
+		zap.Strings("deleted", event.DeletedKeyIDs),
 		zap.Error(event.Err),
 	)
 }
 
-// OnResolveEvent outputs structured logging about the event to the logger
-// established via WithLogger when this listener was created.
-func (l *Listener) OnResolveEvent(event clortho.ResolveEvent) {
-	level := zapcore.InfoLevel
+// OnFetchEvent logs the outcome of one fetch by a PerKeyProvider: the
+// provider's URL template, the key ID that was asked for, and the error if it
+// failed.  The key ID comes from a token that had not been verified.  It has
+// passed the check on what a key ID may hold, and how often one is logged is
+// bounded by the provider's limits on fetching.
+func (l *Listener) OnFetchEvent(event clortho.FetchEvent) {
+	level := l.level
 	if event.Err != nil {
 		level = zapcore.ErrorLevel
 	}
 
-	ce := l.logger.Check(level, "key resolve")
+	ce := l.logger.Check(level, "key fetch")
 	if ce == nil {
 		return
 	}

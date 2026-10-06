@@ -3,14 +3,9 @@
 
 // Package clorthofx provides integration with go.uber.org/fx.
 //
-// Provide supplies the components of a verification path from a single
-// clortho.Config: a clortho.KeyRing, the clortho.Refresher that fills it and is
-// bound to the application lifecycle, a jws.KeyProvider that verifies against
-// it, and a clortho.Resolver for on-demand lookups.  See Provide for the full
-// list and for what each component requires.
-//
-// An optional clortho.Parser and clortho.Loader can be provided to tailor how
-// key material is loaded and parsed, and an optional *zap.Logger and
-// *touchstone.Factory enable logging and metrics for refresh and resolve
-// events.
+// Provide builds every provider the application's Config asks for, of any of
+// the three kinds clortho makes, and presents them to the application as one
+// jws.KeyProvider for a bascule token parser.  It binds each KeySetProvider
+// to the application lifecycle.  An optional *zap.Logger and
+// *touchstone.Factory enable logging and metrics.  See Provide.
 package clorthofx
